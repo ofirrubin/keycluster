@@ -166,6 +166,8 @@ label,
 #kc-locale,
 .kc-locale-wrapper,
 #kc-locale-dropdown,
+#kc-locale-dropdown-menu,
+.kc-dropdown,
 .pf-c-dropdown__toggle.pf-m-plain {
     display: none !important;
 }

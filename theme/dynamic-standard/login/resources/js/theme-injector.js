@@ -20,7 +20,18 @@
         return null;
     };
 
-    let urlLocale = getParam('ui_locales') || getParam('kc_locale') || 'en';
+    let urlLocale = getParam('ui_locales') || getParam('kc_locale');
+
+    // Default to server-rendered language if available, then system, then 'en'
+    if (!urlLocale) {
+        if (document.documentElement.lang) {
+            urlLocale = document.documentElement.lang;
+        } else {
+            const navLang = navigator.language || navigator.userLanguage || 'en';
+            urlLocale = navLang.split('-')[0];
+        }
+    }
+
     const urlThemeOverride = getParam('ui_theme');
 
     if (urlLocale === 'iw' || urlLocale.startsWith('he')) {

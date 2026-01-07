@@ -13,7 +13,7 @@ deploy-domain-manager:
 
 build:
 	eval $$(minikube docker-env) && \
-	docker build -t keycloak-custom:latest . && \
+	docker build --no-cache -t keycloak-custom:latest . && \
 	docker build -t domain-manager:latest ./services/domain-manager
 
 restart:
