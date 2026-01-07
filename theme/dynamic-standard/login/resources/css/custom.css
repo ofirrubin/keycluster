@@ -1,0 +1,216 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+@font-face {
+    font-family: 'Roboto';
+    src: local('Roboto'),
+        url('../fonts/Roboto-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Roboto';
+    src: local('Roboto Medium'),
+        local('Roboto-Medium'),
+        url('../fonts/Roboto-Medium.ttf') format('truetype');
+    font-weight: 500;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Roboto';
+    src: local('Roboto Bold'),
+        local('Roboto-Bold'),
+        url('../fonts/Roboto-Bold.ttf') format('truetype');
+    font-weight: 700;
+    font-style: normal;
+}
+
+:root {
+    /* Light Mode Defaults */
+    --primary-color: #6366f1;
+    --secondary-color: #4f46e5;
+    --background-color: #f8fafc;
+    --card-bg: rgba(255, 255, 255, 0.8);
+    --text-color: #0f172a;
+    --border-radius: 1.25rem;
+    --input-bg: rgba(255, 255, 255, 0.9);
+    --input-border: #e2e8f0;
+    --label-color: #64748b;
+    --font-family: 'Roboto', 'Inter', system-ui, -apple-system, sans-serif;
+    --logo-url: none;
+}
+
+:root.dark-mode {
+    --background-color: #0f172a;
+    --card-bg: rgba(255, 255, 255, 0.05);
+    --text-color: #f8fafc;
+    --input-bg: rgba(0, 0, 0, 0.2);
+    --input-border: rgba(255, 255, 255, 0.1);
+    --label-color: #94a3b8;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not(.light-mode) {
+        --background-color: #0f172a;
+        --card-bg: rgba(255, 255, 255, 0.05);
+        --text-color: #f8fafc;
+        --input-bg: rgba(0, 0, 0, 0.2);
+        --input-border: rgba(255, 255, 255, 0.1);
+        --label-color: #94a3b8;
+    }
+}
+
+body {
+    background: url('../img/bg.png') no-repeat center center fixed !important;
+    background-size: cover !important;
+    color: var(--text-color) !important;
+    font-family: var(--font-family) !important;
+    margin: 0;
+    height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Glassmorphism Card */
+.login-pf-page .card-pf {
+    background: var(--card-bg) !important;
+    backdrop-filter: blur(16px) !important;
+    -webkit-backdrop-filter: blur(16px) !important;
+    border: 1px solid rgba(255, 255, 255, 0.1) !important;
+    border-radius: var(--border-radius) !important;
+    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
+    padding: 3rem !important;
+    max-width: 450px !important;
+    width: 100% !important;
+}
+
+.login-pf-page .login-pf-header {
+    margin-bottom: 2rem !important;
+}
+
+/* Typography & Labels */
+h1#kc-page-title {
+    font-size: 1.875rem !important;
+    font-weight: 700 !important;
+    letter-spacing: -0.025em !important;
+    color: var(--text-color) !important;
+    margin-bottom: 0.5rem !important;
+}
+
+.pf-c-form__label-text,
+label,
+.help-block,
+.instruction {
+    color: var(--label-color) !important;
+    font-weight: 500 !important;
+    font-size: 0.875rem !important;
+}
+
+/* Inputs */
+.form-control {
+    background: var(--input-bg) !important;
+    border: 1px solid var(--input-border) !important;
+    color: var(--text-color) !important;
+    border-radius: 0.75rem !important;
+    padding: 0.75rem 1rem !important;
+    transition: all 0.2s ease !important;
+}
+
+.form-control:focus {
+    border-color: var(--primary-color) !important;
+    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2) !important;
+}
+
+/* Buttons */
+.btn-primary {
+    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)) !important;
+    border: none !important;
+    border-radius: 0.75rem !important;
+    padding: 0.875rem !important;
+    font-weight: 600 !important;
+    letter-spacing: 0.025em !important;
+    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+    width: 100% !important;
+    margin-top: 1rem !important;
+    color: #fff !important;
+}
+
+.btn-primary:hover {
+    transform: translateY(-1px) !important;
+    box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.4) !important;
+}
+
+.btn-primary:active {
+    transform: translateY(0) !important;
+}
+
+/* Logo */
+#kc-logo-wrapper {
+    background-image: var(--logo-url) !important;
+    background-size: contain !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    height: 80px !important;
+    margin-bottom: 2.5rem !important;
+    width: 100% !important;
+    display: block !important;
+}
+
+/* Links */
+#kc-registration span a,
+#kc-login-reset-password a,
+#kc-form-options a,
+.login-pf-signup-link a {
+    color: var(--primary-color) !important;
+    text-decoration: none !important;
+    font-size: 0.875rem !important;
+    transition: color 0.2s ease !important;
+    font-weight: 500 !important;
+}
+
+#kc-registration span a:hover,
+#kc-login-reset-password a:hover,
+#kc-form-options a:hover {
+    filter: brightness(1.2) !important;
+}
+
+/* Dark Mode fixes for generic spans/labels */
+.dark-mode span,
+.dark-mode label,
+.dark-mode .pf-c-check__label {
+    color: var(--text-color) !important;
+}
+
+/* RTL Support */
+[dir="rtl"] {
+    text-align: right !important;
+}
+
+[dir="rtl"] .pf-c-form__group-label {
+    text-align: right !important;
+}
+
+[dir="rtl"] .pf-c-check {
+    padding-left: 0 !important;
+    padding-right: 20px !important;
+}
+
+[dir="rtl"] #kc-form-options {
+    text-align: right !important;
+}
+
+/* Transitions */
+* {
+    transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+        border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+}
+
+/* Hide Native Keycloak Locale Selector */
+#kc-locale,
+.kc-locale-wrapper,
+#kc-locale-dropdown,
+.pf-c-dropdown__toggle.pf-m-plain {
+    display: none !important;
+}

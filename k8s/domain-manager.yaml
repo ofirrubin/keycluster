@@ -1,0 +1,69 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: domain-manager-sa
+  namespace: keycloak
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: domain-manager-role
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: domain-manager-binding
+subjects:
+  - kind: ServiceAccount
+    name: domain-manager-sa
+    namespace: keycloak
+roleRef:
+  kind: ClusterRole
+  name: domain-manager-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: domain-manager
+  namespace: keycloak
+spec:
+  ports:
+    - port: 80
+      targetPort: 8000
+  selector:
+    app: domain-manager
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: domain-manager
+  namespace: keycloak
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: domain-manager
+  template:
+    metadata:
+      labels:
+        app: domain-manager
+    spec:
+      serviceAccountName: domain-manager-sa
+      containers:
+        - name: domain-manager
+          image: domain-manager:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "200m"
+              memory: "256Mi"

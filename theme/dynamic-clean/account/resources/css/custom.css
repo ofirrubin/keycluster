@@ -1,0 +1,163 @@
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+
+@font-face {
+    font-family: 'Roboto';
+    src: local('Roboto'),
+        url('../fonts/Roboto-Regular.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Roboto';
+    src: local('Roboto Medium'),
+        local('Roboto-Medium'),
+        url('../fonts/Roboto-Medium.ttf') format('truetype');
+    font-weight: 500;
+    font-style: normal;
+}
+
+@font-face {
+    font-family: 'Roboto';
+    src: local('Roboto Bold'),
+        local('Roboto-Bold'),
+        url('../fonts/Roboto-Bold.ttf') format('truetype');
+    font-weight: 700;
+    font-style: normal;
+}
+
+:root {
+    --primary-color: #000000;
+    --secondary-color: #171717;
+    --background-color: #ffffff;
+    --card-bg: #ffffff;
+    --text-color: #000000;
+    --border-radius: 0.375rem;
+    --input-bg: #ffffff;
+    --input-border: #e5e5e5;
+    --muted-text: #737373;
+    --font-family: 'Roboto', 'Geist', 'Inter', system-ui, sans-serif;
+    --logo-url: none;
+}
+
+:root.dark-mode {
+    --primary-color: #ffffff;
+    --secondary-color: #e5e5e5;
+    --background-color: #0a0a0a;
+    --card-bg: #0a0a0a;
+    --text-color: #ffffff;
+    --input-bg: #0a0a0a;
+    --input-border: #262626;
+    --muted-text: #a3a3a3;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not(.light-mode) {
+        --primary-color: #ffffff;
+        --secondary-color: #e5e5e5;
+        --background-color: #0a0a0a;
+        --card-bg: #0a0a0a;
+        --text-color: #ffffff;
+        --input-bg: #0a0a0a;
+        --input-border: #262626;
+        --muted-text: #a3a3a3;
+    }
+}
+
+body {
+    background-color: var(--background-color) !important;
+    color: var(--text-color) !important;
+    font-family: var(--font-family) !important;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    margin: 0;
+}
+
+.login-pf-page .card-pf {
+    border: 1px solid var(--input-border) !important;
+    border-radius: var(--border-radius) !important;
+    padding: 2.5rem !important;
+    max-width: 400px !important;
+    width: 100% !important;
+    background: var(--card-bg) !important;
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1) !important;
+}
+
+h1#kc-page-title {
+    font-size: 1.5rem !important;
+    font-weight: 600 !important;
+    letter-spacing: -0.025em !important;
+    text-align: center;
+    margin-bottom: 0.5rem !important;
+    color: var(--text-color) !important;
+}
+
+.pf-c-form__label-text,
+label,
+.help-block,
+.instruction {
+    font-size: 0.875rem !important;
+    font-weight: 500 !important;
+    margin-bottom: 0.5rem !important;
+    color: var(--text-color) !important;
+}
+
+.form-control {
+    border: 1px solid var(--input-border) !important;
+    border-radius: var(--border-radius) !important;
+    padding: 0.5rem 0.75rem !important;
+    height: 2.5rem !important;
+    font-size: 0.875rem !important;
+    background: var(--input-bg) !important;
+    color: var(--text-color) !important;
+}
+
+.form-control:focus {
+    outline: 2px solid var(--primary-color) !important;
+    outline-offset: 2px !important;
+    border-color: transparent !important;
+}
+
+.btn-primary {
+    background-color: var(--primary-color) !important;
+    color: var(--background-color) !important;
+    border: none !important;
+    height: 2.5rem !important;
+    font-weight: 500 !important;
+    border-radius: var(--border-radius) !important;
+    padding: 0 1rem !important;
+    width: 100% !important;
+    margin-top: 1rem !important;
+}
+
+.btn-primary:hover {
+    opacity: 0.9 !important;
+}
+
+#kc-logo-wrapper {
+    background-image: var(--logo-url) !important;
+    background-size: contain;
+    background-position: center;
+    background-repeat: no-repeat;
+    height: 40px;
+    margin-bottom: 1.5rem;
+    display: block;
+}
+
+#kc-registration span a,
+#kc-login-reset-password a,
+#kc-form-options a,
+.login-pf-signup-link a {
+    color: var(--muted-text) !important;
+    text-decoration: underline !important;
+    text-underline-offset: 4px !important;
+}
+
+/* Dark Mode fixes for generic spans/labels */
+.dark-mode span,
+.dark-mode label,
+.dark-mode .pf-c-check__label {
+    color: var(--text-color) !important;
+}

@@ -1,0 +1,5 @@
+fastapi
+uvicorn
+kubernetes-asyncio
+pydantic
+python-dotenv
