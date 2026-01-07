@@ -20,7 +20,7 @@ class ThemeConfig(BaseModel):
     backgroundColor: str = "#ffffff" # White background
     backgroundUrl: str | None = None
     backgroundCss: str | None = None
-    cardBg: str = "#ffffff"
+    cardBg: str | None = None
     borderRadius: int = 4
     fontFamily: str = "Roboto, sans-serif"
     
