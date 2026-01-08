@@ -58,6 +58,17 @@ spec:
         - name: domain-manager
           image: domain-manager:latest
           imagePullPolicy: IfNotPresent
+          command: ["/bin/sh", "-c"]
+          args:
+            [
+              "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000",
+            ]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: domain-manager-secret
+                  key: DATABASE_URL
           ports:
             - containerPort: 8000
           resources:

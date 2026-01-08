@@ -27,7 +27,7 @@
         urlLocale = 'he';
     }
 
-    const configApi = `http://localhost:8001/v1/themes/${realm}`;
+    const configApi = `/v1/themes/${realm}`;
 
     fetch(configApi)
         .then(response => response.json())

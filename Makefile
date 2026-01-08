@@ -35,6 +35,7 @@ tunnels:
 
 test:
 	./tests/integration_test.sh
+	./tests/test-persistence.sh
 
 test-full:
 	./tests/run-test-full.sh

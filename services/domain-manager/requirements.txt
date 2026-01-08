@@ -3,3 +3,7 @@ uvicorn
 kubernetes-asyncio
 pydantic
 python-dotenv
+sqlmodel
+alembic
+asyncpg
+psycopg2-binary
