@@ -3,11 +3,11 @@
     if (!realmMatch) return;
 
     const realm = realmMatch[1];
+    let lastValidConfig = {}; // State for rollback
 
-    // --- 1. Parse URL Parameters (OIDC Hints) ---
-    const urlParams = new URLSearchParams(window.location.search);
-
+    // --- 1. Helper: URL Parameter Parsing ---
     const getParam = (key) => {
+        const urlParams = new URLSearchParams(window.location.search);
         if (urlParams.has(key)) return urlParams.get(key);
         const redirectUri = urlParams.get('redirect_uri');
         if (redirectUri) {
@@ -21,76 +21,72 @@
     };
 
     let urlLocale = getParam('ui_locales') || getParam('kc_locale') || 'en';
+    if (urlLocale === 'iw' || urlLocale.startsWith('he')) urlLocale = 'he';
     const urlThemeOverride = getParam('ui_theme');
 
-    if (urlLocale === 'iw' || urlLocale.startsWith('he')) {
-        urlLocale = 'he';
-    }
-
-    const configApi = `/v1/themes/${realm}`;
-
-    fetch(configApi)
-        .then(response => response.json())
-        .then(config => {
+    // --- 2. Core Logic: Apply Theme Config ---
+    const applyTheme = (config) => {
+        try {
             const root = document.documentElement;
             const translations = config.translations && config.translations[urlLocale] ? config.translations[urlLocale] : {};
 
-            // RTL
+            // RTL Support
             if (urlLocale === 'he' || urlLocale === 'ar') {
                 document.body.dir = 'rtl';
                 document.documentElement.setAttribute('dir', 'rtl');
                 document.documentElement.classList.add('rtl');
             }
 
-            // Styling
-            if (config.primaryColor) root.style.setProperty('--primary-color', config.primaryColor);
-            if (config.secondaryColor) root.style.setProperty('--secondary-color', config.secondaryColor);
-            if (config.backgroundColor) root.style.setProperty('--background-color', config.backgroundColor);
-            if (config.borderRadius) root.style.setProperty('--border-radius', config.borderRadius + 'px');
-            if (config.fontFamily) root.style.setProperty('--font-family', config.fontFamily);
-            if (config.logoUrl) root.style.setProperty('--logo-url', `url(${config.logoUrl})`);
-            if (config.cardBg) root.style.setProperty('--card-bg', config.cardBg);
+            // Styling Variables
+            const setVar = (key, val) => val ? root.style.setProperty(key, val) : root.style.removeProperty(key);
+            setVar('--primary-color', config.primaryColor);
+            setVar('--secondary-color', config.secondaryColor);
+            setVar('--background-color', config.backgroundColor);
+            setVar('--border-radius', config.borderRadius ? config.borderRadius + 'px' : null);
+            setVar('--font-family', config.fontFamily);
+            setVar('--logo-url', config.logoUrl ? `url(${config.logoUrl})` : null);
+            setVar('--card-bg', config.cardBg);
 
-            // Theme Mode
+            // Theme Mode (Dark/Light/System)
             const modeToApply = urlThemeOverride || config.themeMode || 'system';
-            const applyMode = (mode) => {
-                if (mode === 'dark' || (mode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
-                    document.documentElement.classList.add('dark-mode');
-                    document.documentElement.classList.remove('light-mode');
-                } else {
-                    document.documentElement.classList.add('light-mode');
-                    document.documentElement.classList.remove('dark-mode');
-                }
-            };
-            applyMode(modeToApply);
+            if (modeToApply === 'dark' || (modeToApply === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                root.classList.add('dark-mode');
+                root.classList.remove('light-mode');
+            } else {
+                root.classList.add('light-mode');
+                root.classList.remove('dark-mode');
+            }
 
-            // Background
+            // Body Background
             if (config.backgroundUrl) {
                 document.body.style.setProperty('background', `url(${config.backgroundUrl}) no-repeat center center fixed`, 'important');
                 document.body.style.setProperty('background-size', 'cover', 'important');
             }
 
-            // Custom CSS
+            // Custom CSS Injection (with deduplication)
+            const existingStyle = document.getElementById('theme-custom-css');
+            if (existingStyle) existingStyle.remove();
+
             if (config.customCss) {
                 const style = document.createElement('style');
+                style.id = 'theme-custom-css';
                 style.textContent = config.customCss;
                 document.head.appendChild(style);
             }
 
             // Text Overrides
-            const titleElem = document.getElementById('kc-page-title') || document.querySelector('h1.pf-c-title');
-            if (titleElem) titleElem.innerText = translations.loginTitle || config.loginTitle || titleElem.innerText;
-
-            const btn = document.getElementById('kc-login');
-            if (btn) {
-                const btnText = translations.loginButtonText || config.loginButtonText;
-                if (btnText) {
-                    if (btn.tagName === 'INPUT') btn.value = btnText;
-                    else btn.innerText = btnText;
+            const createOrUpdate = (selector, text) => {
+                const el = document.querySelector(selector);
+                if (el && text) {
+                    if (el.tagName === 'INPUT') el.value = text;
+                    else el.innerText = text;
                 }
-            }
+            };
 
-            // Labels
+            createOrUpdate('#kc-page-title, h1.pf-c-title', translations.loginTitle || config.loginTitle);
+            createOrUpdate('#kc-login', translations.loginButtonText || config.loginButtonText);
+
+            // Label Mapping
             const fieldMapping = {
                 'username': translations.emailLabel,
                 'password': translations.passwordLabel
@@ -104,14 +100,57 @@
 
             // Footer
             const footerText = translations.footerText || config.footerText;
+            let footer = document.getElementById('custom-footer');
             if (footerText) {
-                let footer = document.getElementById('custom-footer') || document.createElement('div');
-                footer.id = 'custom-footer';
-                footer.style.marginTop = '20px';
-                footer.style.opacity = '0.7';
+                if (!footer) {
+                    footer = document.createElement('div');
+                    footer.id = 'custom-footer';
+                    footer.style.marginTop = '20px';
+                    footer.style.opacity = '0.7';
+                    const card = document.querySelector('.card-pf');
+                    if (card) card.appendChild(footer);
+                }
                 footer.innerHTML = footerText;
-                const card = document.querySelector('.card-pf');
-                if (card && !document.getElementById('custom-footer')) card.appendChild(footer);
+            } else if (footer) {
+                footer.remove();
             }
+
+            // Success: Update valid state
+            lastValidConfig = JSON.parse(JSON.stringify(config));
+            console.log('[ThemeInjector] Theme applied successfully.');
+
+        } catch (e) {
+            console.error('[ThemeInjector] Failed to apply theme. Reverting...', e);
+            // Revert Logic
+            if (Object.keys(lastValidConfig).length > 0) {
+                applyTheme(lastValidConfig);
+            }
+        }
+    };
+
+    // --- 3. Initial Load ---
+    const configApi = `/v1/themes/${realm}`;
+    fetch(configApi)
+        .then(response => {
+            if (!response.ok) throw new Error("Config API Failed");
+            return response.json();
+        })
+        .then(config => {
+            applyTheme(config);
+        })
+        .catch(err => {
+            console.warn('[ThemeInjector] Could not load theme config, using defaults.', err);
         });
+
+    // --- 4. Live Editor Listener ---
+    window.addEventListener('message', (event) => {
+        // In production, uncomment and set your allowed origin
+        // if (event.origin !== "https://dashboard.keycluster.com") return;
+
+        if (event.data && event.data.type === 'UPDATE_THEME_PREVIEW') {
+            console.log('[ThemeInjector] Received Live Preview update');
+            applyTheme(event.data.payload);
+        }
+    });
+
 })();

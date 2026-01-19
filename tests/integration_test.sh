@@ -100,6 +100,15 @@ else
     echo "   ❌ FAILURE: Master realm is accessible (Got HTTP $CODE_BLOCKED)!"
 fi
 
+echo "   Testing theme API (/v1/themes/$TEST_REALM)..."
+THEME_CODE=$(curl -s -o /dev/null -w "%{http_code}" --connect-timeout 5 -H "Host: $TEST_DOMAIN" "$TARGET_URL/v1/themes/$TEST_REALM")
+if [ "$THEME_CODE" == "200" ]; then
+    echo "   ✅ SUCCESS: Theme API is accessible."
+else
+    echo "   ❌ FAILURE: Theme API returned HTTP $THEME_CODE"
+    exit 1
+fi
+
 echo "---"
 echo "🎉 Integration Test Complete!"
 echo "To clean up:"

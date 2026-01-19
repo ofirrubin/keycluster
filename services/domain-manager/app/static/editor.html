@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theme Live Editor</title>
+    <style>
+        body { font-family: sans-serif; display: flex; height: 100vh; margin: 0; }
+        .sidebar { width: 300px; padding: 20px; background: #f0f0f0; border-right: 1px solid #ccc; display: flex; flex-direction: column; gap: 10px; }
+        .preview { flex: 1; border: none; }
+        label { font-weight: bold; margin-top: 10px; }
+        input[type="color"], input[type="text"] { width: 100%; padding: 5px; }
+        .note { font-size: 0.8em; color: #666; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <h2>Live Editor</h2>
+        <p class="note">Previewing: Sandbox Realm</p>
+        
+        <label>Iframe URL</label>
+        <input type="text" id="iframeUrl" value="http://sandbox.keycluster.com/realms/sandbox/account">
+        <button onclick="loadIframe()">Load</button>
+
+        <hr>
+
+        <label>Primary Color</label>
+        <input type="color" id="primaryColor" value="#ff0000" oninput="updateTheme()">
+
+        <label>Secondary Color</label>
+        <input type="color" id="secondaryColor" value="#333333" oninput="updateTheme()">
+
+        <label>Background Color</label>
+        <input type="color" id="backgroundColor" value="#ffffff" oninput="updateTheme()">
+        
+        <label>Login Title</label>
+        <input type="text" id="loginTitle" value="Live Preview" oninput="updateTheme()">
+        
+        <label>Login Button</label>
+        <input type="text" id="loginButtonText" value="Sign In Now" oninput="updateTheme()">
+
+        <label>Footer Text</label>
+        <input type="text" id="footerText" value="Powered by Live Editor" oninput="updateTheme()">
+    </div>
+    <iframe id="previewFrame" class="preview" src=""></iframe>
+
+    <script>
+        const iframe = document.getElementById('previewFrame');
+        
+        function loadIframe() {
+            iframe.src = document.getElementById('iframeUrl').value;
+        }
+
+        function updateTheme() {
+            const payload = {
+                primaryColor: document.getElementById('primaryColor').value,
+                secondaryColor: document.getElementById('secondaryColor').value,
+                backgroundColor: document.getElementById('backgroundColor').value,
+                loginTitle: document.getElementById('loginTitle').value,
+                loginButtonText: document.getElementById('loginButtonText').value,
+                footerText: document.getElementById('footerText').value,
+                themeMode: 'light'
+            };
+
+            // Send message to Iframe
+            // Note: '*' allows any origin. In production, restrict this.
+            iframe.contentWindow.postMessage({
+                type: 'UPDATE_THEME_PREVIEW',
+                payload: payload
+            }, '*');
+        }
+
+        // Initial load
+        // loadIframe(); 
+    </script>
+</body>
+</html>

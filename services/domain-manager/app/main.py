@@ -2,6 +2,8 @@ import asyncio
 import logging
 from typing import Optional, List
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from kubernetes_asyncio import client, config
 from kubernetes_asyncio.client.rest import ApiException
@@ -19,6 +21,54 @@ app = FastAPI(title="Keycluster Domain Manager")
 
 NAMESPACE = "keycloak"
 INGRESS_CLASS = "nginx"
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Serve static files (Editor UI)
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
+
+class ThemeConfig(BaseModel):
+    # Colors & Layout
+    primaryColor: str = "#000000"
+    secondaryColor: str = "#333333"
+    backgroundColor: str = "#ffffff"
+    backgroundUrl: str | None = None
+    backgroundCss: str | None = None
+    cardBg: str | None = None
+    borderRadius: int = 4
+    fontFamily: str = "Roboto, sans-serif"
+    
+    # Modes
+    themeMode: str = "light"
+    
+    # Brand
+    logoUrl: str | None = None
+    showRealmName: bool = True
+    
+    # Content
+    footerText: str | None = "Secured by Keycluster"
+    customCss: str | None = ""
+    
+    # Text Overrides
+    loginTitle: str | None = "Sign In"
+    loginButtonText: str | None = "Login"
+    
+    # Dynamic Translations
+    translations: dict[str, dict[str, str]] = {
+        "en": {
+            "loginTitle": "Sign In",
+            "loginButtonText": "Login",
+            "emailLabel": "Email",
+            "passwordLabel": "Password",
+            "footerText": "Secured by Keycluster"
+        }
+    }
 
 class DomainMappingSchema(BaseModel):
     realm: str
@@ -52,24 +102,35 @@ def generate_ingress_manifest(realm: str, domain: str, theme_name: str = "dynami
         # Explicit Theme Assets (Only this theme)
         (f"/resources/.*/login/{theme_name}", "ImplementationSpecific"),
         (f"/resources/.*/email/{theme_name}", "ImplementationSpecific"),
+
+        # Theme Config API
+        (f"/v1/themes/{realm}", "Prefix"),
         
         # Basic site files
         ("/robots.txt", "Exact"),
         ("/favicon.ico", "Exact")
     ]
     
-    ingress_paths = [
-        {
+    ingress_paths = []
+    for p, pt in rules:
+        service_name = "keycloak"
+        service_port = 8080
+        
+        # Route Theme API to Domain Manager (us)
+        if p.startswith("/v1/themes"):
+            service_name = "domain-manager"
+            service_port = 80
+            
+        ingress_paths.append({
             "path": p,
             "pathType": pt,
             "backend": {
                 "service": {
-                    "name": "keycloak",
-                    "port": {"number": 8080}
+                    "name": service_name,
+                    "port": {"number": service_port}
                 }
             }
-        } for p, pt in rules
-    ]
+        })
 
     return {
         "apiVersion": "networking.k8s.io/v1",
@@ -219,6 +280,15 @@ async def run_cleanup(valid_realms: List[str]):
                     
     except ApiException as e:
         logger.error(f"Failed to list ingresses for cleanup: {e}")
+
+@app.get("/v1/themes/{realm}", response_model=ThemeConfig)
+async def get_theme(realm: str):
+    """
+    Serve theme configuration for the realm.
+    In a real scenario, this would fetch from DB based on realm or theme_name.
+    For now, returns default valid config to satisfy theme-injector.js.
+    """
+    return ThemeConfig()
 
 @app.get("/health")
 async def health():
