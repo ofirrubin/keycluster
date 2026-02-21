@@ -33,9 +33,13 @@
     --card-bg: #ffffff;
     --text-color: #000000;
     --border-radius: 0.375rem;
+    --input-border-radius: 0.375rem;
+    --card-blur: 0px;
     --input-bg: #ffffff;
     --input-border: #e5e5e5;
     --muted-text: #737373;
+    --input-focus-color: #000000;
+    --icon-color: #737373;
     --font-family: 'Roboto', 'Geist', 'Inter', system-ui, sans-serif;
     --logo-url: none;
 }
@@ -82,6 +86,8 @@ body {
     max-width: 400px !important;
     width: 100% !important;
     background: var(--card-bg) !important;
+    backdrop-filter: blur(var(--card-blur)) !important;
+    -webkit-backdrop-filter: blur(var(--card-blur)) !important;
     box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1) !important;
 }
 
@@ -106,7 +112,7 @@ label,
 
 .form-control {
     border: 1px solid var(--input-border) !important;
-    border-radius: var(--border-radius) !important;
+    border-radius: var(--input-border-radius) !important;
     padding: 0.5rem 0.75rem !important;
     height: 2.5rem !important;
     font-size: 0.875rem !important;
@@ -115,9 +121,16 @@ label,
 }
 
 .form-control:focus {
-    outline: 2px solid var(--primary-color) !important;
+    outline: 2px solid var(--input-focus-color) !important;
     outline-offset: 2px !important;
     border-color: transparent !important;
+}
+
+/* Eye Icon / Toggle Password */
+.pf-c-form-control__toggle-icon,
+.fa-eye,
+.fa-eye-slash {
+    color: var(--icon-color) !important;
 }
 
 .btn-primary {
@@ -126,7 +139,7 @@ label,
     border: none !important;
     height: 2.5rem !important;
     font-weight: 500 !important;
-    border-radius: var(--border-radius) !important;
+    border-radius: var(--input-border-radius) !important;
     padding: 0 1rem !important;
     width: 100% !important;
     margin-top: 1rem !important;

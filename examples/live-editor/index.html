@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Theme Live Editor</title>
+    <style>
+        body {
+            font-family: sans-serif;
+            display: flex;
+            height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        .sidebar {
+            width: 320px;
+            min-width: 320px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-right: 1px solid #dee2e6;
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            overflow-y: auto;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.05);
+            z-index: 10;
+        }
+
+        .preview {
+            flex: 1;
+            border: none;
+            background: #e9ecef;
+        }
+
+        h2 {
+            margin-top: 0;
+            font-size: 1.25rem;
+        }
+
+        label {
+            font-weight: 600;
+            margin-top: 5px;
+            font-size: 0.85em;
+            display: block;
+            margin-bottom: 4px;
+            color: #343a40;
+        }
+
+        .control-group {
+            border-bottom: 1px solid #e9ecef;
+            padding-bottom: 15px;
+        }
+
+        .control-row {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+
+        input[type="color"] {
+            width: 100%;
+            height: 36px;
+            padding: 0;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+
+        input[type="text"],
+        input[type="url"],
+        select {
+            width: 100%;
+            padding: 8px;
+            box-sizing: border-box;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 0.9em;
+        }
+
+        input[type="range"] {
+            width: 100%;
+            margin: 5px 0;
+        }
+
+        .note {
+            font-size: 0.75em;
+            color: #6c757d;
+            margin: 4px 0 10px 0;
+            line-height: 1.4;
+        }
+
+        button {
+            padding: 10px 16px;
+            background: #0d6efd;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+            width: 100%;
+            font-weight: 600;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: #0b5ed7;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="sidebar">
+        <h2>Live Editor (PoC)</h2>
+
+        <div class="control-group">
+            <label>Base Realm URL to Preview</label>
+            <input type="text" id="baseUrl" value="http://localhost:8080/realms/example">
+            <p class="note">Enter the base URL of your realm (e.g. up to /realms/example)</p>
+
+            <div class="control-row">
+                <div style="flex:1">
+                    <label>Page</label>
+                    <select id="targetPage">
+                        <option value="login">Login</option>
+                        <option value="register">Register</option>
+                    </select>
+                </div>
+                <div style="flex:1">
+                    <label>Lang</label>
+                    <select id="uiLocale">
+                        <option value="en">English</option>
+                        <option value="he">Hebrew</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="control-row">
+                <div style="flex:1">
+                    <label>Theme Mode</label>
+                    <select id="uiTheme">
+                        <option value="light">Light</option>
+                        <option value="dark">Dark</option>
+                        <option value="system">System</option>
+                    </select>
+                </div>
+            </div>
+
+            <button onclick="loadIframe()">Load & Sync</button>
+        </div>
+
+        <div class="control-group">
+            <label>Brand & Assets</label>
+            <label style="font-weight:normal">Logo URL</label>
+            <input type="text" id="logoUrl" placeholder="https://..." oninput="updateTheme()">
+
+            <label style="font-weight:normal">Global Background</label>
+            <select id="backgroundType" onchange="toggleBackgroundControls(); updateTheme();" style="margin-bottom:5px">
+                <option value="color">Solid Color</option>
+                <option value="image">Image URL</option>
+            </select>
+            <input type="color" id="backgroundColor" value="#ffffff" oninput="updateTheme()">
+            <input type="text" id="backgroundUrl" class="hidden" placeholder="https://example.com/bg.jpg"
+                oninput="updateTheme()">
+        </div>
+
+        <div class="control-group">
+            <label>Colors</label>
+            <div class="control-row">
+                <div style="flex:1">
+                    <label style="font-weight:normal">Primary</label>
+                    <input type="color" id="primaryColor" value="#000000" oninput="updateTheme()">
+                </div>
+                <div style="flex:1">
+                    <label style="font-weight:normal">Secondary</label>
+                    <input type="color" id="secondaryColor" value="#333333" oninput="updateTheme()">
+                </div>
+            </div>
+            <div class="control-row">
+                <div style="flex:1">
+                    <label style="font-weight:normal">Input Focus</label>
+                    <input type="color" id="inputFocusColor" value="#000000" oninput="updateTheme()">
+                </div>
+                <div style="flex:1">
+                    <label style="font-weight:normal">Icons</label>
+                    <input type="color" id="iconColor" value="#737373" oninput="updateTheme()">
+                </div>
+            </div>
+            <label style="font-weight:normal">Card Background</label>
+            <input type="color" id="cardBg" value="#ffffff" oninput="updateTheme()">
+        </div>
+
+        <div class="control-group">
+            <label>Styles & Radius</label>
+            <label style="font-weight:normal">Card Radius: <span id="radiusVal"></span>px</label>
+            <input type="range" id="borderRadius" min="0" max="50" value="6" oninput="updateTheme()">
+
+            <label style="font-weight:normal">Input Radius: <span id="inputRadiusVal"></span>px</label>
+            <input type="range" id="inputBorderRadius" min="0" max="50" value="4" oninput="updateTheme()">
+
+            <label style="font-weight:normal">Card Blur: <span id="blurVal"></span>px</label>
+            <input type="range" id="cardBlur" min="0" max="20" value="0" oninput="updateTheme()">
+
+            <label style="font-weight:normal">Card Opacity: <span id="opacityVal"></span></label>
+            <input type="range" id="cardOpacity" min="0" max="1" step="0.1" value="1" oninput="updateTheme()">
+        </div>
+
+        <div class="control-group">
+            <label>Text Content</label>
+            <input type="text" id="loginTitle" placeholder="Page Title" oninput="updateTheme()"
+                style="margin-bottom:5px">
+            <input type="text" id="loginButtonText" placeholder="Button Text" oninput="updateTheme()"
+                style="margin-bottom:5px">
+            <input type="text" id="footerText" placeholder="Footer Text" oninput="updateTheme()">
+        </div>
+    </div>
+
+    <iframe id="previewFrame" class="preview" src=""></iframe>
+
+    <script>
+        const iframe = document.getElementById('previewFrame');
+
+        async function loadIframe() {
+            let baseUrl = document.getElementById('baseUrl').value.trim();
+            // Remove trailing slash
+            if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+
+            const page = document.getElementById('targetPage').value;
+            const locale = document.getElementById('uiLocale').value;
+            const theme = document.getElementById('uiTheme').value;
+
+            // Simplify to use the Account Console URL, which redirects to Login if not authenticated.
+            // This avoids manual OIDC construction (PKCE, nonce, etc.) and relies on Keycloak's native flow.
+            // Expected format: http://.../realms/example/account?ui_locales=xx&ui_theme=yy
+            let targetUrl = `${baseUrl}/account?ui_locales=${locale}&ui_theme=${theme}`;
+
+            // Note: 'register' page direct deep link via /account isn't standard without OIDC params.
+            // We focus on the Login page preview here. 
+            // If strictly needed, one could use the registrations endpoint, but for simplicity we stick to account.
+
+            console.log("Loading Preview URL:", targetUrl);
+
+            // Set Iframe
+            iframe.src = targetUrl;
+
+            // Wait for load then request state
+            iframe.onload = () => {
+                setTimeout(() => {
+                    iframe.contentWindow.postMessage({ type: 'REQUEST_CURRENT_THEME' }, '*');
+                }, 1000);
+            };
+        }
+
+        function toggleBackgroundControls() {
+            const type = document.getElementById('backgroundType').value;
+            if (type === 'color') {
+                document.getElementById('backgroundColor').classList.remove('hidden');
+                document.getElementById('backgroundUrl').classList.add('hidden');
+            } else {
+                document.getElementById('backgroundColor').classList.add('hidden');
+                document.getElementById('backgroundUrl').classList.remove('hidden');
+            }
+        }
+
+        window.addEventListener('message', (event) => {
+            if (event.data.type === 'THEME_STATE') {
+                console.log("Received theme state:", event.data.payload);
+                const p = event.data.payload;
+
+                // Colors
+                if (p.primaryColor) document.getElementById('primaryColor').value = p.primaryColor;
+                if (p.secondaryColor) document.getElementById('secondaryColor').value = p.secondaryColor;
+                if (p.backgroundColor) document.getElementById('backgroundColor').value = p.backgroundColor;
+                if (p.cardBg && p.cardBg.startsWith('#')) document.getElementById('cardBg').value = p.cardBg.substring(0, 7);
+
+                // Advanced
+                if (p.inputFocusColor) document.getElementById('inputFocusColor').value = p.inputFocusColor;
+                if (p.iconColor) document.getElementById('iconColor').value = p.iconColor;
+                if (p.logoUrl && p.logoUrl !== 'none') document.getElementById('logoUrl').value = p.logoUrl.replace('url(', '').replace(')', '');
+
+                // Radius & Blur
+                if (p.borderRadius) document.getElementById('borderRadius').value = p.borderRadius;
+                if (p.inputBorderRadius) document.getElementById('inputBorderRadius').value = p.inputBorderRadius;
+                if (p.cardBlur) document.getElementById('cardBlur').value = p.cardBlur;
+
+                // Texts
+                if (p.loginTitle) document.getElementById('loginTitle').value = p.loginTitle;
+                if (p.loginButtonText) document.getElementById('loginButtonText').value = p.loginButtonText;
+                if (p.footerText) document.getElementById('footerText').value = p.footerText;
+
+                // Force UI refresh values
+                updateTheme(false);
+            }
+        });
+
+        function updateTheme(propagate = true) {
+            // Update labels
+            document.getElementById('radiusVal').innerText = document.getElementById('borderRadius').value;
+            document.getElementById('inputRadiusVal').innerText = document.getElementById('inputBorderRadius').value;
+            document.getElementById('blurVal').innerText = document.getElementById('cardBlur').value;
+            document.getElementById('opacityVal').innerText = document.getElementById('cardOpacity').value;
+
+            if (!propagate) return;
+
+            const payload = {
+                primaryColor: document.getElementById('primaryColor').value,
+                secondaryColor: document.getElementById('secondaryColor').value,
+                inputFocusColor: document.getElementById('inputFocusColor').value,
+                iconColor: document.getElementById('iconColor').value,
+
+                backgroundType: document.getElementById('backgroundType').value,
+                backgroundColor: document.getElementById('backgroundColor').value,
+                backgroundUrl: document.getElementById('backgroundUrl').value,
+                logoUrl: document.getElementById('logoUrl').value,
+
+                cardBg: document.getElementById('cardBg').value,
+                cardOpacity: document.getElementById('cardOpacity').value,
+
+                borderRadius: document.getElementById('borderRadius').value,
+                inputBorderRadius: document.getElementById('inputBorderRadius').value,
+                cardBlur: document.getElementById('cardBlur').value,
+
+                loginTitle: document.getElementById('loginTitle').value,
+                loginButtonText: document.getElementById('loginButtonText').value,
+                footerText: document.getElementById('footerText').value,
+            };
+
+            // Send message to Iframe
+            if (iframe.contentWindow) {
+                iframe.contentWindow.postMessage({
+                    type: 'UPDATE_THEME_PREVIEW',
+                    payload: payload
+                }, '*');
+            }
+        }
+
+        // Init labels
+        updateTheme(false);
+    </script>
+</body>
+
+</html>

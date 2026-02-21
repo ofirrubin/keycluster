@@ -7,3 +7,5 @@ sqlmodel
 alembic
 asyncpg
 psycopg2-binary
+httpx
+cryptography

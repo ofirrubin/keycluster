@@ -64,11 +64,27 @@ spec:
               "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000",
             ]
           env:
+            - name: KEYCLOAK_ADMIN
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-secret
+                  key: KEYCLOAK_ADMIN
+            - name: KEYCLOAK_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-secret
+                  key: KEYCLOAK_ADMIN_PASSWORD
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
                   name: domain-manager-secret
                   key: DATABASE_URL
+            - name: KEYCLOAK_SERVER_URL
+              value: "http://keycloak:8080"
+            - name: KEYCLOAK_REALM
+              value: "master"
+            - name: ADMIN_ROLES
+              value: "admin,keycluster-admin,realm-admin"
           ports:
             - containerPort: 8000
           resources:

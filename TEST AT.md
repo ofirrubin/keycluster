@@ -1,7 +1,7 @@
-http://localhost:8080/realms/example/account?ui_locales=he
-http://localhost:8080/realms/example/account?ui_locales=en
-http://localhost:8080/realms/example/account?ui_locales=he&ui_theme=dark
-http://localhost:8080/realms/example/account?ui_locales=en&ui_theme=light
-http://localhost:8080/realms/example/account?ui_locales=he&ui_theme=system
-http://localhost:8080/realms/example/account?ui_locales=en&ui_theme=system
-http://localhost:8080/realms/example/account
+http://auth.example.kc/realms/example/account?ui_locales=he
+http://auth.example.kc/realms/example/account?ui_locales=en
+http://auth.example.kc/realms/example/account?ui_locales=he&ui_theme=dark
+http://auth.example.kc/realms/example/account?ui_locales=en&ui_theme=light
+http://auth.example.kc/realms/example/account?ui_locales=he&ui_theme=system
+http://auth.example.kc/realms/example/account?ui_locales=en&ui_theme=system
+http://auth.example.kc/realms/example/account
