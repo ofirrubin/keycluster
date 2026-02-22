@@ -144,8 +144,7 @@
 
     // --- 4. Live Editor Listener ---
     window.addEventListener('message', (event) => {
-        // In production, uncomment and set your allowed origin
-        // if (event.origin !== "https://dashboard.keycluster.com") return;
+        if (event.origin !== window.location.origin) return;
 
         if (event.data && event.data.type === 'UPDATE_THEME_PREVIEW') {
             console.log('[ThemeInjector] Received Live Preview update');

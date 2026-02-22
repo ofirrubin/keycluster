@@ -7,6 +7,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, field_validator
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from urllib.parse import quote
 
 from app.database import get_session
 from app.models.role_template import RoleTemplate
@@ -303,7 +304,7 @@ async def apply_template_to_realm(
 
             try:
                 resp = await http.post(
-                    f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/roles",
+                    f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/roles",
                     json=payload,
                     headers=headers,
                     timeout=10.0,
@@ -333,7 +334,7 @@ async def apply_template_to_realm(
             for comp_name in composite_roles:
                 try:
                     resp = await http.get(
-                        f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/roles/{comp_name}",
+                        f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/roles/{quote(comp_name, safe='')}",
                         headers=headers,
                         timeout=10.0,
                     )
@@ -348,7 +349,7 @@ async def apply_template_to_realm(
             if composite_payloads:
                 try:
                     resp = await http.post(
-                        f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/roles/{role_name}/composites",
+                        f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/roles/{quote(role_name, safe='')}/composites",
                         json=composite_payloads,
                         headers=headers,
                         timeout=10.0,

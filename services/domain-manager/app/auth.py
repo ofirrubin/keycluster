@@ -8,6 +8,7 @@ import logging
 import os
 import re
 import time
+from collections import deque
 from typing import List, Optional
 
 import httpx
@@ -83,6 +84,11 @@ def audit_log(action: str, claims: dict, realm: str = "", details: str = "") -> 
 _jwks_cache: Optional[dict] = None
 _jwks_uri_cache: Optional[str] = None
 
+# Rate limiting for JWKS refresh: max 10 fetches per 60 seconds
+_JWKS_RATE_LIMIT_MAX = 10
+_JWKS_RATE_LIMIT_WINDOW = 60
+_jwks_fetch_timestamps: deque = deque()
+
 
 async def _fetch_keycloak_jwks_uri() -> str:
     url = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
@@ -109,6 +115,16 @@ async def _get_jwks() -> dict:
 
 async def _refresh_jwks() -> dict:
     global _jwks_cache, _jwks_uri_cache
+    now = time.time()
+    # Evict timestamps outside the rate-limit window
+    while _jwks_fetch_timestamps and _jwks_fetch_timestamps[0] < now - _JWKS_RATE_LIMIT_WINDOW:
+        _jwks_fetch_timestamps.popleft()
+    if len(_jwks_fetch_timestamps) >= _JWKS_RATE_LIMIT_MAX:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many JWKS refresh requests — please retry later",
+        )
+    _jwks_fetch_timestamps.append(now)
     if _jwks_uri_cache is None:
         _jwks_uri_cache = await _fetch_keycloak_jwks_uri()
     _jwks_cache = await _fetch_jwks(_jwks_uri_cache)

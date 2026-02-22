@@ -4,6 +4,7 @@ from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, field_validator
 import httpx
+from urllib.parse import quote
 
 from app.auth import (
     require_admin,
@@ -91,7 +92,7 @@ async def _resolve_client_internal_id(
 ) -> str:
     """Resolve a Keycloak clientId to its internal UUID."""
     resp = await http.get(
-        f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients",
+        f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients",
         params={"clientId": client_id},
         headers=headers,
         timeout=10.0,
@@ -115,7 +116,7 @@ async def _assign_service_account_roles(
 ) -> None:
     """Assign realm roles to the service account user of a client."""
     sa_resp = await http.get(
-        f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients/{internal_client_id}/service-account-user",
+        f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients/{quote(internal_client_id, safe='')}/service-account-user",
         headers=headers,
         timeout=10.0,
     )
@@ -125,7 +126,7 @@ async def _assign_service_account_roles(
     role_payloads = []
     for rn in role_names:
         role_resp = await http.get(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/roles/{rn}",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/roles/{quote(rn, safe='')}",
             headers=headers,
             timeout=10.0,
         )
@@ -137,7 +138,7 @@ async def _assign_service_account_roles(
 
     if role_payloads:
         assign_resp = await http.post(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/users/{sa_user_id}/role-mappings/realm",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/users/{quote(sa_user_id, safe='')}/role-mappings/realm",
             json=role_payloads,
             headers=headers,
             timeout=10.0,
@@ -160,7 +161,7 @@ async def list_service_accounts(
 
     async with httpx.AsyncClient() as http:
         resp = await http.get(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients",
             headers=headers,
             timeout=10.0,
         )
@@ -213,7 +214,7 @@ async def create_service_account(
     async with httpx.AsyncClient() as http:
         # Create client
         resp = await http.post(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients",
             json=client_payload,
             headers=headers,
             timeout=10.0,
@@ -240,7 +241,7 @@ async def create_service_account(
 
         # Fetch the generated client secret
         secret_resp = await http.get(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients/{internal_id}/client-secret",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients/{quote(internal_id, safe='')}/client-secret",
             headers=headers,
             timeout=10.0,
         )
@@ -281,7 +282,7 @@ async def delete_service_account(
         )
 
         resp = await http.delete(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients/{internal_id}",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients/{quote(internal_id, safe='')}",
             headers=headers,
             timeout=10.0,
         )
@@ -317,7 +318,7 @@ async def rotate_client_secret(
 
         # POST to regenerate the secret
         resp = await http.post(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients/{internal_id}/client-secret",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients/{quote(internal_id, safe='')}/client-secret",
             headers=headers,
             timeout=10.0,
         )

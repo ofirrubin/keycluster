@@ -1,11 +1,14 @@
 import asyncio
+import ipaddress
 import logging
 import os
 import re
+import socket
 import httpx
 from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from urllib.parse import quote
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, field_validator
 from kubernetes_asyncio import client, config
@@ -134,6 +137,8 @@ class ThemeConfig(BaseModel):
                 raise ValueError("customCss must not contain data: URIs")
             if "javascript:" in lower:
                 raise ValueError("customCss must not contain javascript: URIs")
+            if "@font-face" in lower:
+                raise ValueError("customCss must not contain @font-face rules")
         return v
 
     @field_validator("fontFamily")
@@ -376,7 +381,7 @@ async def patch_realm_security_headers(
         }
         try:
             resp = await http.put(
-                f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}",
+                f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}",
                 json=payload,
                 headers=headers,
                 timeout=5.0,
@@ -641,6 +646,45 @@ async def get_domain_health(
     cert_valid = False
     keycloak_responding = False
 
+    # SSRF protection: resolve domain and reject private/loopback addresses
+    _BLOCKED_NETWORKS = [
+        ipaddress.ip_network("10.0.0.0/8"),
+        ipaddress.ip_network("172.16.0.0/12"),
+        ipaddress.ip_network("192.168.0.0/16"),
+        ipaddress.ip_network("127.0.0.0/8"),
+        ipaddress.ip_network("169.254.0.0/16"),
+        ipaddress.ip_network("::1/128"),
+    ]
+
+    try:
+        resolved_ip = await asyncio.get_event_loop().run_in_executor(
+            None, socket.gethostbyname, domain
+        )
+        ip_obj = ipaddress.ip_address(resolved_ip)
+        for net in _BLOCKED_NETWORKS:
+            if ip_obj in net:
+                logger.warning(
+                    "Domain health check blocked for realm '%s': IP %s is in blocked range",
+                    realm, resolved_ip,
+                )
+                return {
+                    "domain": domain,
+                    "resolves": False,
+                    "cert_valid": False,
+                    "keycloak_responding": False,
+                    "status": "unknown",
+                    "reason": "domain resolves to a blocked IP range",
+                }
+    except OSError:
+        return {
+            "domain": domain,
+            "resolves": False,
+            "cert_valid": False,
+            "keycloak_responding": False,
+            "status": "unknown",
+            "reason": "domain does not resolve",
+        }
+
     scheme = "https" if tls_enabled else "http"
     check_url = f"{scheme}://{domain}/realms/master"
 
@@ -810,47 +854,6 @@ async def run_cleanup(valid_realms: List[str]) -> None:
 
     except ApiException as e:
         logger.error("Failed to list ingresses for cleanup: %s", e)
-
-    await cleanup_keycloak_realms(valid_realms)
-
-
-async def cleanup_keycloak_realms(valid_realms: List[str]) -> None:
-    token = await get_keycloak_token()
-    if not token:
-        return
-
-    async with httpx.AsyncClient() as http:
-        headers = {"Authorization": f"Bearer {token}"}
-        try:
-            resp = await http.get(
-                f"{KEYCLOAK_SERVER_URL}/admin/realms",
-                headers=headers,
-                timeout=10.0,
-            )
-            resp.raise_for_status()
-            realms = resp.json()
-
-            for r in realms:
-                rid = r["realm"]
-                if rid == "master":
-                    continue
-                if rid not in valid_realms:
-                    logger.warning(
-                        "Found orphan Keycloak realm '%s'. Deleting...", rid
-                    )
-                    try:
-                        del_resp = await http.delete(
-                            f"{KEYCLOAK_SERVER_URL}/admin/realms/{rid}",
-                            headers=headers,
-                            timeout=10.0,
-                        )
-                        del_resp.raise_for_status()
-                        logger.info("Deleted orphan realm: %s", rid)
-                    except Exception as e:
-                        logger.error("Failed to delete realm %s: %s", rid, e)
-
-        except Exception as e:
-            logger.error("Failed to list/clean realms: %s", e)
 
 
 # ---------------------------------------------------------------------------
