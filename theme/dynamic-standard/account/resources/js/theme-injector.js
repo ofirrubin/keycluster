@@ -27,7 +27,17 @@
         urlLocale = 'he';
     }
 
-    const configApi = `http://localhost:8001/v1/themes/${realm}`;
+    function isSafeUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        try {
+            var parsed = new URL(url);
+            return parsed.protocol === 'https:';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    const configApi = `${window.location.origin}/v1/themes/${encodeURIComponent(realm)}`;
 
     fetch(configApi)
         .then(response => response.json())
@@ -48,7 +58,7 @@
             if (config.backgroundColor) root.style.setProperty('--background-color', config.backgroundColor);
             if (config.borderRadius) root.style.setProperty('--border-radius', config.borderRadius + 'px');
             if (config.fontFamily) root.style.setProperty('--font-family', config.fontFamily);
-            if (config.logoUrl) root.style.setProperty('--logo-url', `url(${config.logoUrl})`);
+            if (config.logoUrl && isSafeUrl(config.logoUrl)) root.style.setProperty('--logo-url', `url(${config.logoUrl})`);
             if (config.cardBg) root.style.setProperty('--card-bg', config.cardBg);
 
             // Theme Mode
@@ -65,7 +75,7 @@
             applyMode(modeToApply);
 
             // Background
-            if (config.backgroundUrl) {
+            if (config.backgroundUrl && isSafeUrl(config.backgroundUrl)) {
                 document.body.style.setProperty('background', `url(${config.backgroundUrl}) no-repeat center center fixed`, 'important');
                 document.body.style.setProperty('background-size', 'cover', 'important');
             }
@@ -109,7 +119,7 @@
                 footer.id = 'custom-footer';
                 footer.style.marginTop = '20px';
                 footer.style.opacity = '0.7';
-                footer.innerHTML = footerText;
+                footer.textContent = footerText;
                 const card = document.querySelector('.card-pf');
                 if (card && !document.getElementById('custom-footer')) card.appendChild(footer);
             }

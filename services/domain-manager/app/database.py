@@ -9,7 +9,11 @@ DATABASE_URL = os.environ.get("DATABASE_URL")
 if not DATABASE_URL:
     raise ValueError("DATABASE_URL environment variable is not set")
 
-engine = create_async_engine(DATABASE_URL, echo=True, future=True)
+engine = create_async_engine(
+    DATABASE_URL,
+    echo=os.environ.get("SQL_ECHO", "").lower() in ("1", "true"),
+    future=True,
+)
 
 async def init_db():
     async with engine.begin() as conn:

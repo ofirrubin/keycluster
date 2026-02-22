@@ -52,6 +52,21 @@
         }
     });
 
+    function isSafeUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        try {
+            var parsed = new URL(url);
+            return parsed.protocol === 'https:';
+        } catch (e) {
+            return false;
+        }
+    }
+
+    function sanitizeCssValue(val) {
+        if (!val || typeof val !== 'string') return '';
+        return val.replace(/[;{}()"'\\]/g, '');
+    }
+
     function hexToRgba(hex, alpha) {
         let r = 0, g = 0, b = 0;
         if (!hex) return `rgba(255, 255, 255, ${alpha})`;
@@ -76,7 +91,7 @@
         if (payload.secondaryColor) root.style.setProperty('--secondary-color', payload.secondaryColor);
 
         // Background Type
-        if (payload.backgroundType === 'image' && payload.backgroundUrl) {
+        if (payload.backgroundType === 'image' && payload.backgroundUrl && isSafeUrl(payload.backgroundUrl)) {
             document.body.style.setProperty('background', `url(${payload.backgroundUrl}) no-repeat center center fixed`, 'important');
             document.body.style.setProperty('background-size', 'cover', 'important');
         } else if (payload.backgroundColor) {
@@ -100,14 +115,17 @@
 
         // Input Styling: .pf-c-form-control
         if (payload.inputBorderRadius !== undefined) {
-            root.style.setProperty('--input-border-radius', payload.inputBorderRadius + 'px');
-            cssRules += `.pf-c-form-control { border-radius: ${payload.inputBorderRadius}px !important; } `;
+            var ibr = parseInt(payload.inputBorderRadius, 10);
+            if (!isNaN(ibr) && ibr >= 0 && ibr <= 50) {
+                root.style.setProperty('--input-border-radius', ibr + 'px');
+                cssRules += '.pf-c-form-control { border-radius: ' + ibr + 'px !important; } ';
+            }
         }
 
         if (payload.inputFocusColor) {
-            root.style.setProperty('--input-focus-color', payload.inputFocusColor);
-            // Keycloak (PatternFly 4) uses box-shadow for focus ring
-            cssRules += `.pf-c-form-control:focus { border-bottom-color: ${payload.inputFocusColor} !important; box-shadow: 0 0 0 1px ${payload.inputFocusColor} !important; } `;
+            var ifc = sanitizeCssValue(payload.inputFocusColor);
+            root.style.setProperty('--input-focus-color', ifc);
+            cssRules += '.pf-c-form-control:focus { border-bottom-color: ' + ifc + ' !important; box-shadow: 0 0 0 1px ' + ifc + ' !important; } ';
         }
 
         updateDynamicStyle(dynamicStyle, cssRules);
@@ -115,7 +133,7 @@
 
         // Advanced Styling
         if (payload.iconColor) root.style.setProperty('--icon-color', payload.iconColor);
-        if (payload.logoUrl) root.style.setProperty('--logo-url', `url(${payload.logoUrl})`);
+        if (payload.logoUrl && isSafeUrl(payload.logoUrl)) root.style.setProperty('--logo-url', `url(${payload.logoUrl})`);
 
         if (payload.cardOpacity !== undefined) {
             const currentBg = payload.cardBg || getComputedStyle(root).getPropertyValue('--card-bg').trim();
@@ -143,7 +161,7 @@
         }
         if (payload.footerText) {
             let footer = document.getElementById('custom-footer');
-            if (footer) footer.innerHTML = payload.footerText;
+            if (footer) footer.textContent = payload.footerText;
         }
     }
 
@@ -170,13 +188,13 @@
 
             loginTitle: (document.getElementById('kc-page-title') || {}).innerText,
             loginButtonText: (document.getElementById('kc-login') || {}).value || (document.getElementById('kc-login') || {}).innerText,
-            footerText: (document.getElementById('custom-footer') || {}).innerHTML,
+            footerText: (document.getElementById('custom-footer') || {}).textContent,
         };
 
         window.parent.postMessage({
             type: 'THEME_STATE',
             payload: state
-        }, '*');
+        }, window.location.origin);
     }
 
     // --- 2. Initial Application (Immediate) ---
@@ -210,7 +228,7 @@
 
     // ... (Existing message listener code) ...
 
-    const configApi = `http://localhost:8000/v1/themes/${realm}`;
+    const configApi = `${window.location.origin}/v1/themes/${encodeURIComponent(realm)}`;
 
     fetch(configApi)
         .then(response => response.json())
@@ -224,7 +242,7 @@
             if (config.backgroundColor) root.style.setProperty('--background-color', config.backgroundColor);
             if (config.borderRadius) root.style.setProperty('--border-radius', config.borderRadius + 'px');
             if (config.fontFamily) root.style.setProperty('--font-family', config.fontFamily);
-            if (config.logoUrl) root.style.setProperty('--logo-url', `url(${config.logoUrl})`);
+            if (config.logoUrl && isSafeUrl(config.logoUrl)) root.style.setProperty('--logo-url', `url(${config.logoUrl})`);
             if (config.cardBg) root.style.setProperty('--card-bg', config.cardBg);
 
             // Re-apply Theme Mode if config specifies it AND no URL override was present
@@ -233,7 +251,7 @@
             }
 
             // Background
-            if (config.backgroundUrl) {
+            if (config.backgroundUrl && isSafeUrl(config.backgroundUrl)) {
                 document.body.style.setProperty('background', `url(${config.backgroundUrl}) no-repeat center center fixed`, 'important');
                 document.body.style.setProperty('background-size', 'cover', 'important');
             }
@@ -265,7 +283,7 @@
                 footer.id = 'custom-footer';
                 footer.style.marginTop = '20px';
                 footer.style.opacity = '0.7';
-                footer.innerHTML = footerText;
+                footer.textContent = footerText;
 
                 const card = document.querySelector('.card-pf'); // Keycloak default class
                 // If not found, try generic container

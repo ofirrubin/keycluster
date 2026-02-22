@@ -5,24 +5,26 @@ metadata:
   namespace: keycloak
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: domain-manager-role
+  namespace: keycloak
 rules:
   - apiGroups: ["networking.k8s.io"]
     resources: ["ingresses"]
     verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: domain-manager-binding
+  namespace: keycloak
 subjects:
   - kind: ServiceAccount
     name: domain-manager-sa
     namespace: keycloak
 roleRef:
-  kind: ClusterRole
+  kind: Role
   name: domain-manager-role
   apiGroup: rbac.authorization.k8s.io
 ---
@@ -54,10 +56,22 @@ spec:
         app: domain-manager
     spec:
       serviceAccountName: domain-manager-sa
+      automountServiceAccountToken: true
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
       containers:
         - name: domain-manager
           image: domain-manager:latest
           imagePullPolicy: IfNotPresent
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities:
+              drop:
+                - ALL
           command: ["/bin/sh", "-c"]
           args:
             [
@@ -87,6 +101,18 @@ spec:
               value: "admin,keycluster-admin,realm-admin"
           ports:
             - containerPort: 8000
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 15
+            periodSeconds: 20
           resources:
             requests:
               cpu: "100m"

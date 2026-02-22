@@ -187,9 +187,21 @@ async def verify_token(request: Request) -> dict:
             logger.warning("JWT verification failed: %s", exc)
             raise HTTPException(status_code=401, detail="Invalid token") from exc
 
+    now = time.time()
+
     exp = payload.get("exp")
-    if exp is not None and time.time() > exp:
+    if exp is None:
+        raise HTTPException(status_code=401, detail="Token missing exp claim")
+    if now > exp:
         raise HTTPException(status_code=401, detail="Token expired")
+
+    nbf = payload.get("nbf")
+    if nbf is not None and now < nbf:
+        raise HTTPException(status_code=401, detail="Token not yet valid")
+
+    iat = payload.get("iat")
+    if iat is not None and iat > now + 60:
+        raise HTTPException(status_code=401, detail="Token issued in the future")
 
     expected_issuer = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}"
     if payload.get("iss") != expected_issuer:

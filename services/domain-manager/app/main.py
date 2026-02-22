@@ -79,6 +79,18 @@ class ThemeConfig(BaseModel):
     loginTitle: str | None = None
     loginButtonText: str | None = None
 
+    @field_validator("footerText", "loginTitle", "loginButtonText")
+    @classmethod
+    def validate_text_fields(cls, v: str | None) -> str | None:
+        if v is not None:
+            if len(v) > 500:
+                raise ValueError("Text field must be under 500 characters")
+            if "<script" in v.lower() or "javascript:" in v.lower():
+                raise ValueError("Text field must not contain script content")
+            if "onerror" in v.lower() or "onload" in v.lower():
+                raise ValueError("Text field must not contain event handlers")
+        return v
+
     @field_validator("primaryColor", "secondaryColor", "backgroundColor")
     @classmethod
     def validate_colors(cls, v: str) -> str:
@@ -108,8 +120,20 @@ class ThemeConfig(BaseModel):
     @field_validator("customCss")
     @classmethod
     def validate_custom_css(cls, v: str | None) -> str | None:
-        if v is not None and len(v) > 10_000:
-            raise ValueError("customCss must be under 10000 characters")
+        if v is not None:
+            if len(v) > 10_000:
+                raise ValueError("customCss must be under 10000 characters")
+            lower = v.lower()
+            if "</style" in lower:
+                raise ValueError("customCss must not contain closing style tags")
+            if "@import" in lower:
+                raise ValueError("customCss must not contain @import rules")
+            if "expression(" in lower:
+                raise ValueError("customCss must not contain expression()")
+            if re.search(r"url\s*\(\s*['\"]?\s*data:", lower):
+                raise ValueError("customCss must not contain data: URIs")
+            if "javascript:" in lower:
+                raise ValueError("customCss must not contain javascript: URIs")
         return v
 
     @field_validator("fontFamily")
@@ -119,6 +143,25 @@ class ThemeConfig(BaseModel):
             raise ValueError("fontFamily must be under 200 characters")
         if any(c in v for c in ("<", ">", "{", "}")):
             raise ValueError("fontFamily contains disallowed characters")
+        return v
+
+    @field_validator("backgroundCss")
+    @classmethod
+    def validate_background_css(cls, v: str | None) -> str | None:
+        if v is not None:
+            if len(v) > 2000:
+                raise ValueError("backgroundCss must be under 2000 characters")
+            lower = v.lower()
+            if "</style" in lower:
+                raise ValueError("backgroundCss must not contain closing style tags")
+            if "@import" in lower:
+                raise ValueError("backgroundCss must not contain @import rules")
+            if "expression(" in lower:
+                raise ValueError("backgroundCss must not contain expression()")
+            if re.search(r"url\s*\(\s*['\"]?\s*data:", lower):
+                raise ValueError("backgroundCss must not contain data: URIs")
+            if "javascript:" in lower:
+                raise ValueError("backgroundCss must not contain javascript: URIs")
         return v
 
     @field_validator("backgroundUrl", "logoUrl")
@@ -271,12 +314,23 @@ class BulkDomainRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
-app = FastAPI(title="Keycluster Domain Manager")
+app = FastAPI(
+    title="Keycluster Domain Manager",
+    description=(
+        "Management API for multi-tenant Keycloak on Kubernetes. "
+        "Handles domain-to-realm mapping, Ingress lifecycle, security header "
+        "configuration, dynamic theme serving, role templates, and service accounts."
+    ),
+    version="1.0.0",
+)
+
+_cors_origin = os.getenv("CORS_ALLOWED_ORIGIN", "")
+_cors_origins = [o.strip() for o in _cors_origin.split(",") if o.strip()] if _cors_origin else []
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[os.getenv("CORS_ALLOWED_ORIGIN", "*")],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=bool(_cors_origins),
     allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
@@ -513,7 +567,10 @@ async def sync_domain(
 
     except ApiException as e:
         logger.error("Kubernetes API Error: %s - %s", e.status, e.body)
-        raise HTTPException(status_code=e.status, detail=f"K8s Error: {e.body}")
+        raise HTTPException(
+            status_code=502,
+            detail="Failed to sync domain with cluster",
+        )
 
     return {
         "status": "synced",
@@ -530,7 +587,11 @@ async def delete_domain_ingress(realm: str, api) -> dict:
         logger.info("Deleted ingress for realm %s", realm)
     except ApiException as e:
         if e.status != 404:
-            raise HTTPException(status_code=e.status, detail=str(e))
+            logger.error("Failed to delete ingress for realm %s: %s", realm, e)
+            raise HTTPException(
+                status_code=502,
+                detail="Failed to delete domain ingress",
+            )
     return {"status": "deleted", "realm": realm}
 
 
@@ -584,7 +645,7 @@ async def get_domain_health(
     check_url = f"{scheme}://{domain}/realms/master"
 
     try:
-        async with httpx.AsyncClient(timeout=3.0, follow_redirects=True) as http:
+        async with httpx.AsyncClient(timeout=3.0, follow_redirects=False) as http:
             resp = await http.get(check_url)
             resolves = True
             keycloak_responding = resp.status_code < 500
@@ -678,7 +739,10 @@ async def bulk_create_domains(
     except Exception as e:
         await session.rollback()
         logger.error("Bulk domain commit failed: %s", e)
-        raise HTTPException(status_code=500, detail=f"Database commit failed: {e}") from e
+        raise HTTPException(
+            status_code=500,
+            detail="Database commit failed",
+        ) from e
 
     for item in body.mappings:
         if any(err["realm"] == item.realm for err in errors):
@@ -878,4 +942,5 @@ async def delete_theme(
 # ---------------------------------------------------------------------------
 @app.get("/health")
 async def health():
+    """Return service health status."""
     return {"status": "ok"}
