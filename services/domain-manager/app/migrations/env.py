@@ -21,6 +21,7 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 from app.models.domain import DomainMapping
 from app.models.theme import RealmTheme
+from app.models.role_template import RoleTemplate
 target_metadata = SQLModel.metadata
 
 # other values from the config, defined by the needs of env.py,

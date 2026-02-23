@@ -317,8 +317,8 @@ async def apply_template_to_realm(
                     resp.raise_for_status()
             except httpx.HTTPStatusError as e:
                 logger.error(
-                    "Failed to create role '%s' in realm '%s': %s",
-                    role_name, realm, e.response.text,
+                    "Failed to create role '%s' in realm '%s': status=%s",
+                    role_name, realm, e.response.status_code,
                 )
                 errors.append(role_name)
 

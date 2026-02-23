@@ -23,6 +23,12 @@ KEYCLOAK_SERVER_URL = os.getenv("KEYCLOAK_SERVER_URL", "http://keycloak:8080")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "master")
 KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "")
 
+if not KEYCLOAK_CLIENT_ID:
+    logger.warning(
+        "KEYCLOAK_CLIENT_ID is not set; JWT audience validation is disabled. "
+        "Set KEYCLOAK_CLIENT_ID in production to enforce aud/azp checks."
+    )
+
 ADMIN_ROLES = [
     r.strip()
     for r in os.getenv("ADMIN_ROLES", "admin,keycluster-admin,realm-admin").split(",")
@@ -200,7 +206,7 @@ async def verify_token(request: Request) -> dict:
             jwks = await _refresh_jwks()
             payload = _verify_jwt_signature(token, jwks)
         except Exception as exc:
-            logger.warning("JWT verification failed: %s", exc)
+            logger.warning("JWT verification failed: exc_type=%s", type(exc).__name__)
             raise HTTPException(status_code=401, detail="Invalid token") from exc
 
     now = time.time()
@@ -275,5 +281,9 @@ async def get_keycloak_admin_token() -> Optional[str]:
             resp.raise_for_status()
             return resp.json()["access_token"]
         except Exception as e:
-            logger.error("Failed to authenticate with Keycloak: %s", e)
+            logger.error(
+                "Failed to authenticate with Keycloak: exc_type=%s status=%s",
+                type(e).__name__,
+                getattr(getattr(e, "response", None), "status_code", "N/A"),
+            )
             return None

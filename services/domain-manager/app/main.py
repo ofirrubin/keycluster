@@ -109,8 +109,8 @@ class ThemeConfig(BaseModel):
     @field_validator("themeMode")
     @classmethod
     def validate_theme_mode(cls, v: str) -> str:
-        if v not in ("light", "dark"):
-            raise ValueError("themeMode must be 'light' or 'dark'")
+        if v not in ("light", "dark", "system"):
+            raise ValueError("themeMode must be 'light', 'dark', or 'system'")
         return v
 
     @field_validator("borderRadius")
@@ -310,6 +310,8 @@ class BulkDomainRequest(BaseModel):
     ) -> List[BulkDomainMappingItem]:
         if not v:
             raise ValueError("At least one mapping is required")
+        if len(v) > 500:
+            raise ValueError("Bulk request must not exceed 500 mappings")
         realms = [m.realm for m in v]
         if len(realms) != len(set(realms)):
             raise ValueError("Duplicate realms are not allowed in a bulk request")
@@ -389,13 +391,16 @@ async def patch_realm_security_headers(
             resp.raise_for_status()
             logger.info("Successfully patched security headers for realm '%s'", realm)
         except Exception as e:
-            logger.error("Failed to patch realm headers for '%s': %s", realm, e)
+            logger.error(
+                "Failed to patch realm headers for '%s': exc_type=%s",
+                realm, type(e).__name__,
+            )
 
 
 # ---------------------------------------------------------------------------
 # Kubernetes helpers
 # ---------------------------------------------------------------------------
-async def get_kubernetes_client():
+async def get_kubernetes_client() -> client.NetworkingV1Api:
     try:
         config.load_incluster_config()
     except config.ConfigException:
@@ -571,7 +576,7 @@ async def sync_domain(
         )
 
     except ApiException as e:
-        logger.error("Kubernetes API Error: %s - %s", e.status, e.body)
+        logger.error("Kubernetes API Error: status=%s", e.status)
         raise HTTPException(
             status_code=502,
             detail="Failed to sync domain with cluster",
@@ -585,7 +590,7 @@ async def sync_domain(
     }
 
 
-async def delete_domain_ingress(realm: str, api) -> dict:
+async def delete_domain_ingress(realm: str, api: client.NetworkingV1Api) -> dict:
     ingress_name = f"keycloak-realm-{realm}"
     try:
         await api.delete_namespaced_ingress(ingress_name, NAMESPACE)
@@ -700,7 +705,10 @@ async def get_domain_health(
     except httpx.TimeoutException:
         resolves = True
     except Exception as e:
-        logger.warning("Domain health check error for realm '%s': %s", realm, e)
+        logger.warning(
+            "Domain health check error for realm '%s': exc_type=%s",
+            realm, type(e).__name__,
+        )
         error_name = type(e).__name__.lower()
         if "ssl" in error_name or "certificate" in error_name:
             resolves = True
@@ -768,8 +776,11 @@ async def bulk_create_domains(
                 db_mapping.updated_at = datetime.now(timezone.utc)
 
         except Exception as e:
-            logger.error("Bulk domain error for realm '%s': %s", item.realm, e)
-            errors.append({"realm": item.realm, "error": str(e)})
+            logger.error(
+                "Bulk domain error for realm '%s': exc_type=%s",
+                item.realm, type(e).__name__,
+            )
+            errors.append({"realm": item.realm, "error": "Validation failed"})
 
     if errors and not created:
         await session.rollback()
@@ -782,7 +793,7 @@ async def bulk_create_domains(
         await session.commit()
     except Exception as e:
         await session.rollback()
-        logger.error("Bulk domain commit failed: %s", e)
+        logger.error("Bulk domain commit failed: exc_type=%s", type(e).__name__)
         raise HTTPException(
             status_code=500,
             detail="Database commit failed",
@@ -828,7 +839,7 @@ async def cleanup_orphans(
     return {"status": "cleanup_triggered", "valid_realms_count": len(valid_realms)}
 
 
-async def run_cleanup(valid_realms: List[str]) -> None:
+async def run_cleanup(valid_realms: list[str]) -> None:
     logger.info("Running orphan cleanup. Valid realms: %s", valid_realms)
     api = await get_kubernetes_client()
 
@@ -944,6 +955,6 @@ async def delete_theme(
 # Health
 # ---------------------------------------------------------------------------
 @app.get("/health")
-async def health():
+async def health() -> dict:
     """Return service health status."""
     return {"status": "ok"}

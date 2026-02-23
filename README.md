@@ -129,7 +129,7 @@ and [INSTALLATION.md](INSTALLATION.md) for production deployment instructions.
 | `KEYCLOAK_ADMIN` | Yes | -- | Username for Keycloak Admin API calls |
 | `KEYCLOAK_ADMIN_PASSWORD` | Yes | -- | Password for Keycloak Admin API calls |
 | `ADMIN_ROLES` | No | `admin,keycluster-admin,realm-admin` | Comma-separated realm roles that grant admin access |
-| `CORS_ALLOWED_ORIGIN` | No | `*` | Allowed CORS origin; restrict in production |
+| `CORS_ALLOWED_ORIGIN` | No | (empty) | Comma-separated allowed CORS origins; restrict in production |
 
 A complete `.env.example` is available at `services/domain-manager/.env.example`.
 

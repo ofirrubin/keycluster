@@ -62,10 +62,10 @@ theme-test-advanced:
 		-d '{\
 			"primaryColor": "#10b981", \
 			"showRealmName": false, \
-			"footerText": "🚀 Powered by Keycluster. Accept <a href=\"#\">Terms</a>", \
+			"footerText": "Powered by Keycluster", \
 			"customCss": "h1#kc-page-title { color: gold !important; font-size: 3rem !important; }", \
 			"loginTitle": "Welcome to the Future", \
-			"loginButtonText": "Secure Access 🔒", \
+			"loginButtonText": "Secure Access", \
 			"themeMode": "system" \
 		}'
 
