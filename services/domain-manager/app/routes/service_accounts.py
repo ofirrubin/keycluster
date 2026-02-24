@@ -3,7 +3,7 @@ import os
 import re
 import urllib.parse
 from typing import List, Optional, Set
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, field_validator
 import httpx
 
@@ -14,6 +14,7 @@ from app.auth import (
     get_keycloak_admin_token,
     KEYCLOAK_SERVER_URL,
 )
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -204,7 +205,9 @@ async def list_service_accounts(
 
 
 @router.post("", response_model=ServiceAccountSecret, status_code=201)
+@limiter.limit("15/minute")
 async def create_service_account(
+    request: Request,
     realm: str,
     body: ServiceAccountCreate,
     claims: dict = Depends(require_admin),
@@ -290,7 +293,9 @@ async def create_service_account(
 
 
 @router.delete("/{client_id}")
+@limiter.limit("15/minute")
 async def delete_service_account(
+    request: Request,
     realm: str,
     client_id: str,
     claims: dict = Depends(require_admin),
@@ -326,7 +331,9 @@ async def delete_service_account(
 
 
 @router.post("/{client_id}/rotate", response_model=ServiceAccountSecret)
+@limiter.limit("10/minute")
 async def rotate_client_secret(
+    request: Request,
     realm: str,
     client_id: str,
     claims: dict = Depends(require_admin),

@@ -348,30 +348,16 @@ app = FastAPI(
     openapi_url="/openapi.json" if _is_dev else None,
 )
 
-# Rate limiting
-try:
-    from slowapi import Limiter
-    from slowapi.util import get_remote_address
-    from slowapi.errors import RateLimitExceeded
+# Rate limiting — hard dependency, must not silently degrade
+from slowapi.errors import RateLimitExceeded
+from app.rate_limit import limiter
 
-    limiter = Limiter(key_func=get_remote_address)
-    app.state.limiter = limiter
+app.state.limiter = limiter
 
-    @app.exception_handler(RateLimitExceeded)
-    async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
-        return JSONResponse(status_code=429, content={"error": "Rate limit exceeded"})
 
-    _has_limiter = True
-except ImportError:
-    _has_limiter = False
-    limiter = None
-
-def _limit(rate: str = "60/minute"):
-    if _has_limiter and limiter:
-        return limiter.limit(rate)
-    def _noop(func):
-        return func
-    return _noop
+@app.exception_handler(RateLimitExceeded)
+async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+    return JSONResponse(status_code=429, content={"error": "Rate limit exceeded"})
 
 _cors_origin = os.getenv("CORS_ALLOWED_ORIGIN", "")
 _cors_origins = [o.strip() for o in _cors_origin.split(",") if o.strip()] if _cors_origin else []
@@ -537,8 +523,9 @@ def generate_ingress_manifest(
 # Domain routes (admin-only)
 # ---------------------------------------------------------------------------
 @app.post("/domains")
-@_limit("30/minute")
+@limiter.limit("30/minute")
 async def sync_domain(
+    request: Request,
     mapping: DomainMappingSchema,
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),
@@ -657,8 +644,9 @@ async def delete_domain_ingress(realm: str, api) -> dict:
 
 
 @app.delete("/domains/{realm}")
-@_limit("30/minute")
+@limiter.limit("30/minute")
 async def delete_domain(
+    request: Request,
     realm: str,
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),
@@ -680,7 +668,9 @@ async def delete_domain(
 
 
 @app.get("/v1/domains/{realm}/health")
+@limiter.limit("30/minute")
 async def get_domain_health(
+    request: Request,
     realm: str,
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),
@@ -744,59 +734,78 @@ async def get_domain_health(
 
 
 @app.post("/v1/domains/bulk")
-@_limit("5/minute")
+@limiter.limit("5/minute")
 async def bulk_create_domains(
+    request: Request,
     body: BulkDomainRequest,
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),
 ) -> dict:
-    """Create or update multiple domain mappings in a single transaction. Admin only."""
-    created: List[DomainMappingResponse] = []
+    """Create or update multiple domain mappings in a single transaction. Admin only.
+
+    The operation is atomic: all items are validated first, and if any item
+    fails validation the entire request is rejected. On success, Kubernetes
+    Ingress resources are created/updated for each domain (fire-and-forget).
+    """
     errors: List[dict] = []
 
+    # ------------------------------------------------------------------
+    # Phase 1: Validate all items and look up existing DB records.
+    #          No mutations happen here.
+    # ------------------------------------------------------------------
+    existing_mappings: dict[str, Optional[DomainMappingModel]] = {}
     for item in body.mappings:
         try:
             statement = select(DomainMappingModel).where(
                 DomainMappingModel.realm == item.realm
             )
             results = await session.execute(statement)
-            db_mapping = results.scalar_one_or_none()
-
-            csp_csv = ",".join(item.csp_allowed_origins)
-
-            if db_mapping is None:
-                db_mapping = DomainMappingModel(
-                    realm=item.realm,
-                    domain=item.domain,
-                    enabled=item.enabled,
-                    csp_allowed_origins=csp_csv,
-                    ssl_required=item.ssl_required,
-                    hsts_max_age=item.hsts_max_age,
-                    tls_enabled=item.tls_enabled,
-                    tls_secret_name=item.tls_secret_name,
-                )
-                session.add(db_mapping)
-            else:
-                db_mapping.domain = item.domain
-                db_mapping.enabled = item.enabled
-                db_mapping.csp_allowed_origins = csp_csv
-                db_mapping.ssl_required = item.ssl_required
-                db_mapping.hsts_max_age = item.hsts_max_age
-                db_mapping.tls_enabled = item.tls_enabled
-                db_mapping.tls_secret_name = item.tls_secret_name
-                db_mapping.updated_at = datetime.now(timezone.utc)
-
+            existing_mappings[item.realm] = results.scalar_one_or_none()
         except Exception as e:
-            logger.error("Bulk domain error for realm '%s': exc_type=%s", item.realm, type(e).__name__)
+            logger.error(
+                "Bulk domain validation error for realm '%s': exc_type=%s",
+                item.realm, type(e).__name__,
+            )
             errors.append({"realm": item.realm, "error": "Validation failed"})
 
-    if errors and not created:
-        await session.rollback()
+    if errors:
         raise HTTPException(
             status_code=422,
-            detail={"message": "All mappings failed validation", "errors": errors},
+            detail={"message": "Validation failed for one or more mappings", "errors": errors},
         )
 
+    # ------------------------------------------------------------------
+    # Phase 2: Apply all DB mutations (create or update).
+    # ------------------------------------------------------------------
+    for item in body.mappings:
+        db_mapping = existing_mappings[item.realm]
+        csp_csv = ",".join(item.csp_allowed_origins)
+
+        if db_mapping is None:
+            db_mapping = DomainMappingModel(
+                realm=item.realm,
+                domain=item.domain,
+                enabled=item.enabled,
+                csp_allowed_origins=csp_csv,
+                ssl_required=item.ssl_required,
+                hsts_max_age=item.hsts_max_age,
+                tls_enabled=item.tls_enabled,
+                tls_secret_name=item.tls_secret_name,
+            )
+            session.add(db_mapping)
+        else:
+            db_mapping.domain = item.domain
+            db_mapping.enabled = item.enabled
+            db_mapping.csp_allowed_origins = csp_csv
+            db_mapping.ssl_required = item.ssl_required
+            db_mapping.hsts_max_age = item.hsts_max_age
+            db_mapping.tls_enabled = item.tls_enabled
+            db_mapping.tls_secret_name = item.tls_secret_name
+            db_mapping.updated_at = datetime.now(timezone.utc)
+
+    # ------------------------------------------------------------------
+    # Phase 3: Single commit for all changes.
+    # ------------------------------------------------------------------
     try:
         await session.commit()
     except Exception as e:
@@ -807,9 +816,9 @@ async def bulk_create_domains(
             detail="Database commit failed",
         ) from e
 
+    # Build response list from committed records.
+    created: List[DomainMappingResponse] = []
     for item in body.mappings:
-        if any(err["realm"] == item.realm for err in errors):
-            continue
         result = await session.execute(
             select(DomainMappingModel).where(DomainMappingModel.realm == item.realm)
         )
@@ -818,11 +827,29 @@ async def bulk_create_domains(
             await session.refresh(db_mapping)
             created.append(DomainMappingResponse.model_validate(db_mapping))
 
+    # ------------------------------------------------------------------
+    # Phase 4: Create/update Kubernetes Ingress for each domain
+    #          (fire-and-forget background tasks, same pattern as sync_domain).
+    # ------------------------------------------------------------------
+    for item in body.mappings:
+        if item.enabled:
+            asyncio.create_task(
+                _sync_ingress_for_realm(
+                    realm=item.realm,
+                    domain=item.domain,
+                    tls_enabled=item.tls_enabled,
+                    tls_secret_name=item.tls_secret_name,
+                    csp_allowed_origins=item.csp_allowed_origins,
+                    ssl_required=item.ssl_required,
+                    hsts_max_age=item.hsts_max_age,
+                )
+            )
+
     _audit_log(
         "domain_bulk_create",
         "*",
         claims,
-        f"created={len(created)} errors={len(errors)}",
+        f"created={len(created)}",
     )
 
     return {
@@ -831,9 +858,51 @@ async def bulk_create_domains(
     }
 
 
+async def _sync_ingress_for_realm(
+    realm: str,
+    domain: str,
+    tls_enabled: bool,
+    tls_secret_name: Optional[str],
+    csp_allowed_origins: List[str],
+    ssl_required: str,
+    hsts_max_age: int,
+) -> None:
+    """Create or update a Kubernetes Ingress for a single realm, then patch
+    Keycloak security headers.  Intended to be called as a fire-and-forget
+    background task from bulk operations."""
+    ingress_name = f"keycloak-realm-{realm}"
+    manifest = generate_ingress_manifest(
+        realm, domain, tls_enabled=tls_enabled, tls_secret_name=tls_secret_name,
+    )
+    try:
+        api = await get_kubernetes_client()
+        try:
+            await api.read_namespaced_ingress(ingress_name, NAMESPACE)
+            await api.replace_namespaced_ingress(ingress_name, NAMESPACE, manifest)
+            logger.info("Bulk: updated ingress for realm %s", realm)
+        except ApiException as e:
+            if e.status == 404:
+                await api.create_namespaced_ingress(NAMESPACE, manifest)
+                logger.info("Bulk: created ingress for realm %s", realm)
+            else:
+                raise
+    except Exception as e:
+        logger.error(
+            "Bulk: failed to sync ingress for realm '%s': exc_type=%s",
+            realm, type(e).__name__,
+        )
+        return
+
+    # Patch realm security headers (best-effort)
+    await patch_realm_security_headers(
+        realm, csp_allowed_origins, ssl_required, hsts_max_age,
+    )
+
+
 @app.post("/cleanup")
-@_limit("5/minute")
+@limiter.limit("5/minute")
 async def cleanup_orphans(
+    request: Request,
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),
@@ -903,8 +972,9 @@ async def get_theme(
 
 
 @app.post("/v1/themes/{realm}", response_model=ThemeConfig)
-@_limit("30/minute")
+@limiter.limit("30/minute")
 async def save_theme(
+    request: Request,
     realm: str,
     theme_config: ThemeConfig,
     session: AsyncSession = Depends(get_session),
@@ -938,7 +1008,9 @@ async def save_theme(
 
 
 @app.delete("/v1/themes/{realm}")
+@limiter.limit("30/minute")
 async def delete_theme(
+    request: Request,
     realm: str,
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),

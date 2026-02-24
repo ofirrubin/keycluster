@@ -4,7 +4,7 @@ import urllib.parse
 import httpx
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, field_validator
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -18,6 +18,7 @@ from app.auth import (
     get_keycloak_admin_token,
     KEYCLOAK_SERVER_URL,
 )
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -160,7 +161,9 @@ async def list_templates(
 
 
 @router.post("", response_model=RoleTemplateResponse, status_code=201)
+@limiter.limit("15/minute")
 async def create_template(
+    request: Request,
     body: RoleTemplateCreate,
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),
@@ -189,7 +192,9 @@ async def create_template(
 
 
 @router.put("/{template_id}", response_model=RoleTemplateResponse)
+@limiter.limit("15/minute")
 async def update_template(
+    request: Request,
     template_id: int,
     body: RoleTemplateUpdate,
     session: AsyncSession = Depends(get_session),
@@ -233,7 +238,9 @@ async def update_template(
 
 
 @router.delete("/{template_id}")
+@limiter.limit("15/minute")
 async def delete_template(
+    request: Request,
     template_id: int,
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),
@@ -260,7 +267,9 @@ async def delete_template(
 
 
 @router.post("/{template_id}/apply/{realm}")
+@limiter.limit("10/minute")
 async def apply_template_to_realm(
+    request: Request,
     template_id: int,
     realm: str,
     session: AsyncSession = Depends(get_session),
