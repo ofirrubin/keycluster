@@ -88,6 +88,8 @@ def audit_log(action: str, claims: dict, realm: str = "", details: str = "") -> 
 # ---------------------------------------------------------------------------
 _jwks_cache: Optional[dict] = None
 _jwks_uri_cache: Optional[str] = None
+_jwks_cache_time: float = 0.0
+_JWKS_CACHE_TTL: float = 300.0  # 5 minutes
 
 # Rate limiter: track JWKS fetch timestamps (max 10 per 60 seconds)
 _JWKS_MAX_FETCHES_PER_MIN: int = 10
@@ -124,10 +126,11 @@ async def _fetch_jwks(jwks_uri: str) -> dict:
 
 
 async def _get_jwks() -> dict:
-    global _jwks_cache, _jwks_uri_cache
-    if _jwks_cache is None:
+    global _jwks_cache, _jwks_uri_cache, _jwks_cache_time
+    if _jwks_cache is None or (time.time() - _jwks_cache_time) > _JWKS_CACHE_TTL:
         _jwks_uri_cache = await _fetch_keycloak_jwks_uri()
         _jwks_cache = await _fetch_jwks(_jwks_uri_cache)
+        _jwks_cache_time = time.time()
     return _jwks_cache
 
 

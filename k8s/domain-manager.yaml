@@ -68,7 +68,7 @@ spec:
           imagePullPolicy: IfNotPresent
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
@@ -97,6 +97,8 @@ spec:
               value: "http://keycloak:8080"
             - name: KEYCLOAK_REALM
               value: "master"
+            - name: KEYCLOAK_CLIENT_ID
+              value: "domain-manager"
             - name: ADMIN_ROLES
               value: "admin,keycluster-admin,realm-admin"
           ports:
@@ -113,6 +115,9 @@ spec:
               port: 8000
             initialDelaySeconds: 15
             periodSeconds: 20
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: "100m"
@@ -120,3 +125,6 @@ spec:
             limits:
               cpu: "200m"
               memory: "256Mi"
+      volumes:
+        - name: tmp
+          emptyDir: {}

@@ -82,11 +82,8 @@ async def cluster_health(
 
     return {
         "status": status,
-        "keycloak": keycloak_status,
-        "database": db_status,
-        # Realms are tracked in Keycloak, not locally — -1 is a documented sentinel
-        "realm_count": -1,
-        "domain_count": domain_count,
+        "keycloak": {"reachable": keycloak_status["reachable"]},
+        "database": {"connected": db_status["connected"]},
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 

@@ -6,8 +6,9 @@ import urllib.parse
 import httpx
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 from kubernetes_asyncio import client, config
 from kubernetes_asyncio.client.rest import ApiException
@@ -132,8 +133,8 @@ class ThemeConfig(BaseModel):
                 raise ValueError("customCss must not contain @font-face rules")
             if "expression(" in lower:
                 raise ValueError("customCss must not contain expression()")
-            if re.search(r"url\s*\(\s*['\"]?\s*data:", lower):
-                raise ValueError("customCss must not contain data: URIs")
+            if re.search(r"url\s*\(", lower):
+                raise ValueError("customCss must not contain url() functions")
             if "javascript:" in lower:
                 raise ValueError("customCss must not contain javascript: URIs")
         return v
@@ -143,7 +144,7 @@ class ThemeConfig(BaseModel):
     def validate_font_family(cls, v: str) -> str:
         if len(v) > 200:
             raise ValueError("fontFamily must be under 200 characters")
-        if any(c in v for c in ("<", ">", "{", "}")):
+        if any(c in v for c in ("<", ">", "{", "}", ";", "(", ")", "\\", "'", '"')):
             raise ValueError("fontFamily contains disallowed characters")
         return v
 
@@ -162,8 +163,8 @@ class ThemeConfig(BaseModel):
                 raise ValueError("backgroundCss must not contain @font-face rules")
             if "expression(" in lower:
                 raise ValueError("backgroundCss must not contain expression()")
-            if re.search(r"url\s*\(\s*['\"]?\s*data:", lower):
-                raise ValueError("backgroundCss must not contain data: URIs")
+            if re.search(r"url\s*\(", lower):
+                raise ValueError("backgroundCss must not contain url() functions")
             if "javascript:" in lower:
                 raise ValueError("backgroundCss must not contain javascript: URIs")
         return v
@@ -347,6 +348,31 @@ app = FastAPI(
     openapi_url="/openapi.json" if _is_dev else None,
 )
 
+# Rate limiting
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+
+    limiter = Limiter(key_func=get_remote_address)
+    app.state.limiter = limiter
+
+    @app.exception_handler(RateLimitExceeded)
+    async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        return JSONResponse(status_code=429, content={"error": "Rate limit exceeded"})
+
+    _has_limiter = True
+except ImportError:
+    _has_limiter = False
+    limiter = None
+
+def _limit(rate: str = "60/minute"):
+    if _has_limiter and limiter:
+        return limiter.limit(rate)
+    def _noop(func):
+        return func
+    return _noop
+
 _cors_origin = os.getenv("CORS_ALLOWED_ORIGIN", "")
 _cors_origins = [o.strip() for o in _cors_origin.split(",") if o.strip()] if _cors_origin else []
 
@@ -511,6 +537,7 @@ def generate_ingress_manifest(
 # Domain routes (admin-only)
 # ---------------------------------------------------------------------------
 @app.post("/domains")
+@_limit("30/minute")
 async def sync_domain(
     mapping: DomainMappingSchema,
     session: AsyncSession = Depends(get_session),
@@ -626,6 +653,7 @@ async def delete_domain_ingress(realm: str, api) -> dict:
 
 
 @app.delete("/domains/{realm}")
+@_limit("30/minute")
 async def delete_domain(
     realm: str,
     session: AsyncSession = Depends(get_session),
@@ -712,6 +740,7 @@ async def get_domain_health(
 
 
 @app.post("/v1/domains/bulk")
+@_limit("5/minute")
 async def bulk_create_domains(
     body: BulkDomainRequest,
     session: AsyncSession = Depends(get_session),
@@ -799,6 +828,7 @@ async def bulk_create_domains(
 
 
 @app.post("/cleanup")
+@_limit("5/minute")
 async def cleanup_orphans(
     background_tasks: BackgroundTasks,
     session: AsyncSession = Depends(get_session),
@@ -869,6 +899,7 @@ async def get_theme(
 
 
 @app.post("/v1/themes/{realm}", response_model=ThemeConfig)
+@_limit("30/minute")
 async def save_theme(
     realm: str,
     theme_config: ThemeConfig,
