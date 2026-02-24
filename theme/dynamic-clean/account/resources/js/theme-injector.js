@@ -24,6 +24,16 @@
     if (urlLocale === 'iw' || urlLocale.startsWith('he')) urlLocale = 'he';
     const urlThemeOverride = getParam('ui_theme');
 
+    function isSafeUrl(url) {
+        if (!url || typeof url !== 'string') return false;
+        try {
+            var parsed = new URL(url);
+            return parsed.protocol === 'https:';
+        } catch (e) {
+            return false;
+        }
+    }
+
     // --- 2. Core Logic: Apply Theme Config ---
     const applyTheme = (config) => {
         try {
@@ -44,7 +54,7 @@
             setVar('--background-color', config.backgroundColor);
             setVar('--border-radius', config.borderRadius ? config.borderRadius + 'px' : null);
             setVar('--font-family', config.fontFamily);
-            setVar('--logo-url', config.logoUrl ? `url(${config.logoUrl})` : null);
+            setVar('--logo-url', config.logoUrl && isSafeUrl(config.logoUrl) ? `url(${config.logoUrl})` : null);
             setVar('--card-bg', config.cardBg);
 
             // Theme Mode (Dark/Light/System)
@@ -58,7 +68,7 @@
             }
 
             // Body Background
-            if (config.backgroundUrl) {
+            if (config.backgroundUrl && isSafeUrl(config.backgroundUrl)) {
                 document.body.style.setProperty('background', `url(${config.backgroundUrl}) no-repeat center center fixed`, 'important');
                 document.body.style.setProperty('background-size', 'cover', 'important');
             }
@@ -110,7 +120,7 @@
                     const card = document.querySelector('.card-pf');
                     if (card) card.appendChild(footer);
                 }
-                footer.innerHTML = footerText;
+                footer.textContent = footerText;
             } else if (footer) {
                 footer.remove();
             }
@@ -129,7 +139,7 @@
     };
 
     // --- 3. Initial Load ---
-    const configApi = `/v1/themes/${realm}`;
+    const configApi = `/v1/themes/${encodeURIComponent(realm)}`;
     fetch(configApi)
         .then(response => {
             if (!response.ok) throw new Error("Config API Failed");
@@ -144,11 +154,9 @@
 
     // --- 4. Live Editor Listener ---
     window.addEventListener('message', (event) => {
-        // In production, uncomment and set your allowed origin
-        // if (event.origin !== "https://dashboard.keycluster.com") return;
+        if (event.origin !== window.location.origin) return;
 
         if (event.data && event.data.type === 'UPDATE_THEME_PREVIEW') {
-            console.log('[ThemeInjector] Received Live Preview update');
             applyTheme(event.data.payload);
         }
     });

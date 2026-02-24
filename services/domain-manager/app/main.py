@@ -2,6 +2,7 @@ import asyncio
 import logging
 import os
 import re
+import urllib.parse
 import httpx
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -19,7 +20,6 @@ from app.models.theme import RealmTheme
 from app.auth import (
     KEYCLOAK_SERVER_URL,
     require_admin,
-    verify_token,
     validate_realm_name as _validate_realm_name,
     validate_domain as _validate_domain,
     validate_hex_color as _validate_hex_color,
@@ -128,6 +128,8 @@ class ThemeConfig(BaseModel):
                 raise ValueError("customCss must not contain closing style tags")
             if "@import" in lower:
                 raise ValueError("customCss must not contain @import rules")
+            if "@font-face" in lower:
+                raise ValueError("customCss must not contain @font-face rules")
             if "expression(" in lower:
                 raise ValueError("customCss must not contain expression()")
             if re.search(r"url\s*\(\s*['\"]?\s*data:", lower):
@@ -156,6 +158,8 @@ class ThemeConfig(BaseModel):
                 raise ValueError("backgroundCss must not contain closing style tags")
             if "@import" in lower:
                 raise ValueError("backgroundCss must not contain @import rules")
+            if "@font-face" in lower:
+                raise ValueError("backgroundCss must not contain @font-face rules")
             if "expression(" in lower:
                 raise ValueError("backgroundCss must not contain expression()")
             if re.search(r"url\s*\(\s*['\"]?\s*data:", lower):
@@ -305,6 +309,8 @@ class BulkDomainRequest(BaseModel):
     ) -> List[BulkDomainMappingItem]:
         if not v:
             raise ValueError("At least one mapping is required")
+        if len(v) > 500:
+            raise ValueError("Bulk request must not exceed 500 entries")
         realms = [m.realm for m in v]
         if len(realms) != len(set(realms)):
             raise ValueError("Duplicate realms are not allowed in a bulk request")
@@ -314,6 +320,8 @@ class BulkDomainRequest(BaseModel):
 # ---------------------------------------------------------------------------
 # App
 # ---------------------------------------------------------------------------
+_is_dev = os.getenv("ENVIRONMENT", "production").lower() == "dev"
+
 app = FastAPI(
     title="Keycluster Domain Manager",
     description=(
@@ -322,6 +330,9 @@ app = FastAPI(
         "configuration, dynamic theme serving, role templates, and service accounts."
     ),
     version="1.0.0",
+    docs_url="/docs" if _is_dev else None,
+    redoc_url="/redoc" if _is_dev else None,
+    openapi_url="/openapi.json" if _is_dev else None,
 )
 
 _cors_origin = os.getenv("CORS_ALLOWED_ORIGIN", "")
@@ -369,6 +380,7 @@ async def patch_realm_security_headers(
         },
     }
 
+    encoded_realm = urllib.parse.quote(realm, safe="")
     async with httpx.AsyncClient() as http:
         headers = {
             "Authorization": f"Bearer {token}",
@@ -376,7 +388,7 @@ async def patch_realm_security_headers(
         }
         try:
             resp = await http.put(
-                f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}",
+                f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}",
                 json=payload,
                 headers=headers,
                 timeout=5.0,
@@ -384,7 +396,10 @@ async def patch_realm_security_headers(
             resp.raise_for_status()
             logger.info("Successfully patched security headers for realm '%s'", realm)
         except Exception as e:
-            logger.error("Failed to patch realm headers for '%s': %s", realm, e)
+            logger.error(
+                "Failed to patch realm headers for '%s': exc_type=%s",
+                realm, type(e).__name__,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -566,7 +581,7 @@ async def sync_domain(
         )
 
     except ApiException as e:
-        logger.error("Kubernetes API Error: %s - %s", e.status, e.body)
+        logger.error("Kubernetes API Error: status=%s", e.status)
         raise HTTPException(
             status_code=502,
             detail="Failed to sync domain with cluster",
@@ -587,7 +602,10 @@ async def delete_domain_ingress(realm: str, api) -> dict:
         logger.info("Deleted ingress for realm %s", realm)
     except ApiException as e:
         if e.status != 404:
-            logger.error("Failed to delete ingress for realm %s: %s", realm, e)
+            logger.error(
+                "Failed to delete ingress for realm %s: exc_type=%s status=%s",
+                realm, type(e).__name__, e.status,
+            )
             raise HTTPException(
                 status_code=502,
                 detail="Failed to delete domain ingress",
@@ -656,7 +674,7 @@ async def get_domain_health(
     except httpx.TimeoutException:
         resolves = True
     except Exception as e:
-        logger.warning("Domain health check error for realm '%s': %s", realm, e)
+        logger.warning("Domain health check error for realm '%s': exc_type=%s", realm, type(e).__name__)
         error_name = type(e).__name__.lower()
         if "ssl" in error_name or "certificate" in error_name:
             resolves = True
@@ -724,8 +742,8 @@ async def bulk_create_domains(
                 db_mapping.updated_at = datetime.now(timezone.utc)
 
         except Exception as e:
-            logger.error("Bulk domain error for realm '%s': %s", item.realm, e)
-            errors.append({"realm": item.realm, "error": str(e)})
+            logger.error("Bulk domain error for realm '%s': exc_type=%s", item.realm, type(e).__name__)
+            errors.append({"realm": item.realm, "error": "Validation failed"})
 
     if errors and not created:
         await session.rollback()
@@ -738,7 +756,7 @@ async def bulk_create_domains(
         await session.commit()
     except Exception as e:
         await session.rollback()
-        logger.error("Bulk domain commit failed: %s", e)
+        logger.error("Bulk domain commit failed: exc_type=%s", type(e).__name__)
         raise HTTPException(
             status_code=500,
             detail="Database commit failed",
@@ -805,52 +823,12 @@ async def run_cleanup(valid_realms: List[str]) -> None:
                     logger.info("Deleted orphan ingress: %s", ing.metadata.name)
                 except Exception as e:
                     logger.error(
-                        "Failed to delete orphan %s: %s", ing.metadata.name, e
+                        "Failed to delete orphan %s: exc_type=%s",
+                        ing.metadata.name, type(e).__name__,
                     )
 
     except ApiException as e:
-        logger.error("Failed to list ingresses for cleanup: %s", e)
-
-    await cleanup_keycloak_realms(valid_realms)
-
-
-async def cleanup_keycloak_realms(valid_realms: List[str]) -> None:
-    token = await get_keycloak_token()
-    if not token:
-        return
-
-    async with httpx.AsyncClient() as http:
-        headers = {"Authorization": f"Bearer {token}"}
-        try:
-            resp = await http.get(
-                f"{KEYCLOAK_SERVER_URL}/admin/realms",
-                headers=headers,
-                timeout=10.0,
-            )
-            resp.raise_for_status()
-            realms = resp.json()
-
-            for r in realms:
-                rid = r["realm"]
-                if rid == "master":
-                    continue
-                if rid not in valid_realms:
-                    logger.warning(
-                        "Found orphan Keycloak realm '%s'. Deleting...", rid
-                    )
-                    try:
-                        del_resp = await http.delete(
-                            f"{KEYCLOAK_SERVER_URL}/admin/realms/{rid}",
-                            headers=headers,
-                            timeout=10.0,
-                        )
-                        del_resp.raise_for_status()
-                        logger.info("Deleted orphan realm: %s", rid)
-                    except Exception as e:
-                        logger.error("Failed to delete realm %s: %s", rid, e)
-
-        except Exception as e:
-            logger.error("Failed to list/clean realms: %s", e)
+        logger.error("Failed to list ingresses for cleanup: exc_type=%s status=%s", type(e).__name__, e.status)
 
 
 # ---------------------------------------------------------------------------

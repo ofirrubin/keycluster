@@ -1,5 +1,6 @@
 import logging
 import re
+import urllib.parse
 from typing import List, Optional
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, field_validator
@@ -90,8 +91,9 @@ async def _resolve_client_internal_id(
     headers: dict,
 ) -> str:
     """Resolve a Keycloak clientId to its internal UUID."""
+    encoded_realm = urllib.parse.quote(realm, safe="")
     resp = await http.get(
-        f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients",
+        f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients",
         params={"clientId": client_id},
         headers=headers,
         timeout=10.0,
@@ -114,8 +116,9 @@ async def _assign_service_account_roles(
     headers: dict,
 ) -> None:
     """Assign realm roles to the service account user of a client."""
+    encoded_realm = urllib.parse.quote(realm, safe="")
     sa_resp = await http.get(
-        f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients/{internal_client_id}/service-account-user",
+        f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients/{internal_client_id}/service-account-user",
         headers=headers,
         timeout=10.0,
     )
@@ -124,8 +127,9 @@ async def _assign_service_account_roles(
 
     role_payloads = []
     for rn in role_names:
+        encoded_role = urllib.parse.quote(rn, safe="")
         role_resp = await http.get(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/roles/{rn}",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/roles/{encoded_role}",
             headers=headers,
             timeout=10.0,
         )
@@ -137,7 +141,7 @@ async def _assign_service_account_roles(
 
     if role_payloads:
         assign_resp = await http.post(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/users/{sa_user_id}/role-mappings/realm",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/users/{sa_user_id}/role-mappings/realm",
             json=role_payloads,
             headers=headers,
             timeout=10.0,
@@ -157,10 +161,11 @@ async def list_service_accounts(
     validate_realm_name(realm)
 
     headers = await _admin_headers()
+    encoded_realm = urllib.parse.quote(realm, safe="")
 
     async with httpx.AsyncClient() as http:
         resp = await http.get(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients",
             headers=headers,
             timeout=10.0,
         )
@@ -197,6 +202,7 @@ async def create_service_account(
     validate_realm_name(realm)
 
     headers = await _admin_headers()
+    encoded_realm = urllib.parse.quote(realm, safe="")
 
     client_payload = {
         "clientId": body.client_id,
@@ -213,7 +219,7 @@ async def create_service_account(
     async with httpx.AsyncClient() as http:
         # Create client
         resp = await http.post(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients",
             json=client_payload,
             headers=headers,
             timeout=10.0,
@@ -240,7 +246,7 @@ async def create_service_account(
 
         # Fetch the generated client secret
         secret_resp = await http.get(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients/{internal_id}/client-secret",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients/{internal_id}/client-secret",
             headers=headers,
             timeout=10.0,
         )
@@ -274,6 +280,7 @@ async def delete_service_account(
         raise HTTPException(status_code=400, detail="Invalid client_id format")
 
     headers = await _admin_headers()
+    encoded_realm = urllib.parse.quote(realm, safe="")
 
     async with httpx.AsyncClient() as http:
         internal_id = await _resolve_client_internal_id(
@@ -281,7 +288,7 @@ async def delete_service_account(
         )
 
         resp = await http.delete(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients/{internal_id}",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients/{internal_id}",
             headers=headers,
             timeout=10.0,
         )
@@ -309,6 +316,7 @@ async def rotate_client_secret(
         raise HTTPException(status_code=400, detail="Invalid client_id format")
 
     headers = await _admin_headers()
+    encoded_realm = urllib.parse.quote(realm, safe="")
 
     async with httpx.AsyncClient() as http:
         internal_id = await _resolve_client_internal_id(
@@ -317,7 +325,7 @@ async def rotate_client_secret(
 
         # POST to regenerate the secret
         resp = await http.post(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/clients/{internal_id}/client-secret",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients/{internal_id}/client-secret",
             headers=headers,
             timeout=10.0,
         )

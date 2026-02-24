@@ -1,5 +1,6 @@
 import logging
 import re
+import urllib.parse
 import httpx
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -290,6 +291,8 @@ async def apply_template_to_realm(
     skipped: List[str] = []
     errors: List[str] = []
 
+    encoded_realm = urllib.parse.quote(realm, safe="")
+
     async with httpx.AsyncClient() as http:
         # Create base roles first
         for role_def in template.roles:
@@ -303,7 +306,7 @@ async def apply_template_to_realm(
 
             try:
                 resp = await http.post(
-                    f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/roles",
+                    f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/roles",
                     json=payload,
                     headers=headers,
                     timeout=10.0,
@@ -316,8 +319,8 @@ async def apply_template_to_realm(
                     resp.raise_for_status()
             except httpx.HTTPStatusError as e:
                 logger.error(
-                    "Failed to create role '%s' in realm '%s': %s",
-                    role_name, realm, e.response.text,
+                    "Failed to create role '%s' in realm '%s': status=%s",
+                    role_name, realm, e.response.status_code,
                 )
                 errors.append(role_name)
 
@@ -328,12 +331,14 @@ async def apply_template_to_realm(
                 continue
 
             role_name = role_def["name"]
+            encoded_role = urllib.parse.quote(role_name, safe="")
             composite_payloads = []
 
             for comp_name in composite_roles:
+                encoded_comp = urllib.parse.quote(comp_name, safe="")
                 try:
                     resp = await http.get(
-                        f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/roles/{comp_name}",
+                        f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/roles/{encoded_comp}",
                         headers=headers,
                         timeout=10.0,
                     )
@@ -341,14 +346,14 @@ async def apply_template_to_realm(
                     composite_payloads.append(resp.json())
                 except Exception as e:
                     logger.warning(
-                        "Could not resolve composite role '%s' for '%s' in realm '%s': %s",
-                        comp_name, role_name, realm, e,
+                        "Could not resolve composite role '%s' for '%s' in realm '%s': exc_type=%s",
+                        comp_name, role_name, realm, type(e).__name__,
                     )
 
             if composite_payloads:
                 try:
                     resp = await http.post(
-                        f"{KEYCLOAK_SERVER_URL}/admin/realms/{realm}/roles/{role_name}/composites",
+                        f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/roles/{encoded_role}/composites",
                         json=composite_payloads,
                         headers=headers,
                         timeout=10.0,
@@ -356,8 +361,8 @@ async def apply_template_to_realm(
                     resp.raise_for_status()
                 except Exception as e:
                     logger.error(
-                        "Failed to set composites for role '%s' in realm '%s': %s",
-                        role_name, realm, e,
+                        "Failed to set composites for role '%s' in realm '%s': exc_type=%s",
+                        role_name, realm, type(e).__name__,
                     )
 
     audit_log(

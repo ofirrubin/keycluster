@@ -40,6 +40,7 @@
 
     // --- Message Listener for Live Editor ---
     window.addEventListener('message', function (event) {
+        if (event.origin !== window.location.origin) return;
         if (!event.data) return;
 
         switch (event.data.type) {

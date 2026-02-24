@@ -7,7 +7,9 @@ import json
 import logging
 import os
 import re
+import sys
 import time
+import urllib.parse
 from typing import List, Optional
 
 import httpx
@@ -21,6 +23,10 @@ logger = logging.getLogger(__name__)
 KEYCLOAK_SERVER_URL = os.getenv("KEYCLOAK_SERVER_URL", "http://keycloak:8080")
 KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "master")
 KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "")
+
+if not KEYCLOAK_CLIENT_ID:
+    logger.critical("KEYCLOAK_CLIENT_ID is required for JWT audience validation")
+    sys.exit(1)
 
 ADMIN_ROLES = [
     r.strip()
@@ -78,14 +84,31 @@ def audit_log(action: str, claims: dict, realm: str = "", details: str = "") -> 
 
 
 # ---------------------------------------------------------------------------
-# JWKS cache and JWT verification
+# JWKS cache, rate limiter, and JWT verification
 # ---------------------------------------------------------------------------
 _jwks_cache: Optional[dict] = None
 _jwks_uri_cache: Optional[str] = None
 
+# Rate limiter: track JWKS fetch timestamps (max 10 per 60 seconds)
+_JWKS_MAX_FETCHES_PER_MIN: int = 10
+_jwks_fetch_timestamps: list[float] = []
+
+
+def _check_jwks_rate_limit() -> None:
+    """Enforce max 10 JWKS fetches per 60 seconds."""
+    now = time.time()
+    cutoff = now - 60.0
+    # Prune old entries
+    while _jwks_fetch_timestamps and _jwks_fetch_timestamps[0] < cutoff:
+        _jwks_fetch_timestamps.pop(0)
+    if len(_jwks_fetch_timestamps) >= _JWKS_MAX_FETCHES_PER_MIN:
+        raise ValueError("JWKS fetch rate limit exceeded")
+    _jwks_fetch_timestamps.append(now)
+
 
 async def _fetch_keycloak_jwks_uri() -> str:
-    url = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
+    encoded_realm = urllib.parse.quote(KEYCLOAK_REALM, safe="")
+    url = f"{KEYCLOAK_SERVER_URL}/realms/{encoded_realm}/.well-known/openid-configuration"
     async with httpx.AsyncClient() as http:
         resp = await http.get(url, timeout=5.0)
         resp.raise_for_status()
@@ -93,6 +116,7 @@ async def _fetch_keycloak_jwks_uri() -> str:
 
 
 async def _fetch_jwks(jwks_uri: str) -> dict:
+    _check_jwks_rate_limit()
     async with httpx.AsyncClient() as http:
         resp = await http.get(jwks_uri, timeout=5.0)
         resp.raise_for_status()
@@ -184,7 +208,7 @@ async def verify_token(request: Request) -> dict:
             jwks = await _refresh_jwks()
             payload = _verify_jwt_signature(token, jwks)
         except Exception as exc:
-            logger.warning("JWT verification failed: %s", exc)
+            logger.warning("JWT verification failed: exc_type=%s", type(exc).__name__)
             raise HTTPException(status_code=401, detail="Invalid token") from exc
 
     now = time.time()
@@ -207,18 +231,17 @@ async def verify_token(request: Request) -> dict:
     if payload.get("iss") != expected_issuer:
         raise HTTPException(status_code=401, detail="Invalid token issuer")
 
-    # Validate aud and azp claims when KEYCLOAK_CLIENT_ID is configured (opt-in)
-    if KEYCLOAK_CLIENT_ID:
-        aud = payload.get("aud")
-        if aud is None:
-            raise HTTPException(status_code=401, detail="Token missing aud claim")
-        aud_list: List[str] = [aud] if isinstance(aud, str) else list(aud)
-        if KEYCLOAK_CLIENT_ID not in aud_list:
-            raise HTTPException(status_code=401, detail="Token audience mismatch")
+    # Validate aud and azp claims (KEYCLOAK_CLIENT_ID is required at startup)
+    aud = payload.get("aud")
+    if aud is None:
+        raise HTTPException(status_code=401, detail="Token missing aud claim")
+    aud_list: List[str] = [aud] if isinstance(aud, str) else list(aud)
+    if KEYCLOAK_CLIENT_ID not in aud_list:
+        raise HTTPException(status_code=401, detail="Token audience mismatch")
 
-        azp = payload.get("azp")
-        if azp is not None and azp != KEYCLOAK_CLIENT_ID:
-            raise HTTPException(status_code=401, detail="Token authorized party mismatch")
+    azp = payload.get("azp")
+    if azp is not None and azp != KEYCLOAK_CLIENT_ID:
+        raise HTTPException(status_code=401, detail="Token authorized party mismatch")
 
     return payload
 
@@ -259,5 +282,5 @@ async def get_keycloak_admin_token() -> Optional[str]:
             resp.raise_for_status()
             return resp.json()["access_token"]
         except Exception as e:
-            logger.error("Failed to authenticate with Keycloak: %s", e)
+            logger.error("Failed to authenticate with Keycloak: exc_type=%s", type(e).__name__)
             return None

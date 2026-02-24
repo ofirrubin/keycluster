@@ -38,7 +38,7 @@ async def _check_keycloak() -> dict:
         logger.warning("Keycloak health check timed out at %s", url)
         return {"reachable": False, "version": None}
     except Exception as e:
-        logger.warning("Keycloak health check failed: %s", e)
+        logger.warning("Keycloak health check failed: exc_type=%s", type(e).__name__)
         return {"reachable": False, "version": None}
 
 
@@ -48,7 +48,7 @@ async def _check_database(session: AsyncSession) -> dict:
         await session.execute(text("SELECT 1"))
         return {"connected": True}
     except Exception as e:
-        logger.error("Database health check failed: %s", e)
+        logger.error("Database health check failed: exc_type=%s", type(e).__name__)
         return {"connected": False}
 
 
@@ -57,7 +57,7 @@ async def _count_domains(session: AsyncSession) -> int:
         result = await session.execute(select(func.count()).select_from(DomainMapping))
         return result.scalar_one()
     except Exception as e:
-        logger.error("Failed to count domain mappings: %s", e)
+        logger.error("Failed to count domain mappings: exc_type=%s", type(e).__name__)
         return -1
 
 
