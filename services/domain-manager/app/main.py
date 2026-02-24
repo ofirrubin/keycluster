@@ -221,12 +221,18 @@ class DomainMappingSchema(BaseModel):
     @classmethod
     def validate_origins(cls, v: List[str]) -> List[str]:
         validated: List[str] = []
+        blocked_csp_keywords = ("unsafe-inline", "unsafe-eval", "unsafe-hashes",
+                                "data:", "blob:", "mediastream:", "filesystem:",
+                                "wasm-unsafe-eval", "none", "self", "strict-dynamic")
         for origin in v:
             origin = origin.strip()
             if not origin.startswith(("http://", "https://")):
                 raise ValueError("Origins must start with http:// or https://")
-            if any(c in origin for c in (";", "'", '"')):
-                raise ValueError("Origins cannot contain semicolons or quotes")
+            if any(c in origin for c in (";", "'", '"', " ")):
+                raise ValueError("Origins cannot contain semicolons, quotes, or spaces")
+            lower = origin.lower()
+            if any(kw in lower for kw in blocked_csp_keywords):
+                raise ValueError("Origins cannot contain CSP directive keywords")
             validated.append(origin)
         return validated
 
@@ -279,12 +285,18 @@ class BulkDomainMappingItem(BaseModel):
     @classmethod
     def validate_origins(cls, v: List[str]) -> List[str]:
         validated: List[str] = []
+        blocked_csp_keywords = ("unsafe-inline", "unsafe-eval", "unsafe-hashes",
+                                "data:", "blob:", "mediastream:", "filesystem:",
+                                "wasm-unsafe-eval", "none", "self", "strict-dynamic")
         for origin in v:
             origin = origin.strip()
             if not origin.startswith(("http://", "https://")):
                 raise ValueError("Origins must start with http:// or https://")
-            if any(c in origin for c in (";", "'", '"')):
-                raise ValueError("Origins cannot contain semicolons or quotes")
+            if any(c in origin for c in (";", "'", '"', " ")):
+                raise ValueError("Origins cannot contain semicolons, quotes, or spaces")
+            lower = origin.lower()
+            if any(kw in lower for kw in blocked_csp_keywords):
+                raise ValueError("Origins cannot contain CSP directive keywords")
             validated.append(origin)
         return validated
 
