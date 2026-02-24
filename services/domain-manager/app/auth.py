@@ -263,9 +263,44 @@ def require_admin(claims: dict = Depends(verify_token)) -> dict:
 # ---------------------------------------------------------------------------
 # Keycloak admin token
 # ---------------------------------------------------------------------------
-async def get_keycloak_admin_token() -> Optional[str]:
-    username = os.getenv("KEYCLOAK_ADMIN")
-    password = os.getenv("KEYCLOAK_ADMIN_PASSWORD")
+_ADMIN_CLIENT_ID: str = os.getenv("KEYCLOAK_ADMIN_CLIENT_ID", "")
+_ADMIN_CLIENT_SECRET: str = os.getenv("KEYCLOAK_ADMIN_CLIENT_SECRET", "")
+_USE_CLIENT_CREDENTIALS: bool = bool(_ADMIN_CLIENT_ID and _ADMIN_CLIENT_SECRET)
+
+if not _USE_CLIENT_CREDENTIALS:
+    logger.warning(
+        "Using password grant for admin API. Consider switching to "
+        "client_credentials with a scoped service account client."
+    )
+
+
+async def _get_token_via_client_credentials() -> Optional[str]:
+    """Obtain an admin token using client_credentials grant (scoped service account)."""
+    async with httpx.AsyncClient() as http:
+        try:
+            resp = await http.post(
+                f"{KEYCLOAK_SERVER_URL}/realms/master/protocol/openid-connect/token",
+                data={
+                    "client_id": _ADMIN_CLIENT_ID,
+                    "client_secret": _ADMIN_CLIENT_SECRET,
+                    "grant_type": "client_credentials",
+                },
+                timeout=5.0,
+            )
+            resp.raise_for_status()
+            return resp.json()["access_token"]
+        except Exception as e:
+            logger.error(
+                "Failed to authenticate with Keycloak (client_credentials): exc_type=%s",
+                type(e).__name__,
+            )
+            return None
+
+
+async def _get_token_via_password() -> Optional[str]:
+    """Obtain an admin token using password grant (legacy, master realm super-admin)."""
+    username: str = os.getenv("KEYCLOAK_ADMIN", "")
+    password: str = os.getenv("KEYCLOAK_ADMIN_PASSWORD", "")
     if not username or not password:
         logger.error("KEYCLOAK_ADMIN credentials not set")
         return None
@@ -285,5 +320,21 @@ async def get_keycloak_admin_token() -> Optional[str]:
             resp.raise_for_status()
             return resp.json()["access_token"]
         except Exception as e:
-            logger.error("Failed to authenticate with Keycloak: exc_type=%s", type(e).__name__)
+            logger.error(
+                "Failed to authenticate with Keycloak (password): exc_type=%s",
+                type(e).__name__,
+            )
             return None
+
+
+async def get_keycloak_admin_token() -> Optional[str]:
+    """Obtain a Keycloak admin API token.
+
+    Prefers client_credentials grant when KEYCLOAK_ADMIN_CLIENT_ID and
+    KEYCLOAK_ADMIN_CLIENT_SECRET are set (scoped service account, lower blast
+    radius). Falls back to password grant with KEYCLOAK_ADMIN /
+    KEYCLOAK_ADMIN_PASSWORD for backward compatibility.
+    """
+    if _USE_CLIENT_CREDENTIALS:
+        return await _get_token_via_client_credentials()
+    return await _get_token_via_password()

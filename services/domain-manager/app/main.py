@@ -543,7 +543,11 @@ async def sync_domain(
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),
 ):
-    """Create or update a domain mapping for a realm."""
+    """Create or update a domain mapping for a realm.
+
+    Domain ownership verification is the responsibility of the orchestration
+    layer (e.g., Magma). This endpoint trusts authenticated callers.
+    """
     api = await get_kubernetes_client()
     ingress_name = f"keycloak-realm-{mapping.realm}"
 

@@ -1,7 +1,8 @@
 import logging
+import os
 import re
 import urllib.parse
-from typing import List, Optional
+from typing import List, Optional, Set
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, field_validator
 import httpx
@@ -15,6 +16,16 @@ from app.auth import (
 )
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Role allowlist
+# ---------------------------------------------------------------------------
+_raw_allowed_roles: str = os.getenv("ALLOWED_GRANTABLE_ROLES", "")
+ALLOWED_GRANTABLE_ROLES: Optional[Set[str]] = (
+    {r.strip() for r in _raw_allowed_roles.split(",") if r.strip()}
+    if _raw_allowed_roles
+    else None
+)
 
 router = APIRouter(
     prefix="/v1/realms/{realm}/service-accounts",
@@ -200,6 +211,17 @@ async def create_service_account(
 ):
     """Create a new service account client in the realm. Admin only."""
     validate_realm_name(realm)
+
+    # Enforce role allowlist when configured
+    if ALLOWED_GRANTABLE_ROLES is not None and body.roles:
+        disallowed: List[str] = [
+            r for r in body.roles if r not in ALLOWED_GRANTABLE_ROLES
+        ]
+        if disallowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Roles not permitted by allowlist: {', '.join(disallowed)}",
+            )
 
     headers = await _admin_headers()
     encoded_realm = urllib.parse.quote(realm, safe="")
