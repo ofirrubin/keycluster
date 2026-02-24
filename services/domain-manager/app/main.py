@@ -55,32 +55,35 @@ _HSTS_MAX_AGE_CAP: int = 63072000  # 2 years, the max recommended value
 _BLOCKED_DOMAIN_SUFFIXES = (".svc.cluster.local", ".local")
 
 
-def _is_private_or_internal(hostname: str) -> bool:
-    """Check if a hostname resolves to a private/internal IP or matches
-    blocked DNS patterns. Prevents DNS rebinding attacks where a domain
-    could resolve to internal services."""
+def _resolve_and_validate(hostname: str) -> List[str]:
+    """Resolve a hostname and validate that all IPs are public.
+
+    Returns a list of validated public IP strings.
+    Raises ValueError if the hostname is internal, unresolvable, or resolves
+    to any private/reserved IP.
+    """
     lower = hostname.lower()
 
     # Block well-known internal hostnames
     if lower in ("localhost",):
-        return True
+        raise ValueError("Hostname is a blocked internal name")
     for suffix in _BLOCKED_DOMAIN_SUFFIXES:
         if lower.endswith(suffix):
-            return True
+            raise ValueError("Hostname matches a blocked internal suffix")
 
     # Resolve the hostname and check all resulting IPs
     try:
         addrinfos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
     except socket.gaierror:
-        # Cannot resolve; not necessarily internal, but treat as unsafe
-        return True
+        raise ValueError("Hostname cannot be resolved")
 
+    validated_ips: List[str] = []
     for family, _type, _proto, _canonname, sockaddr in addrinfos:
         ip_str = sockaddr[0]
         try:
             addr = ipaddress.ip_address(ip_str)
         except ValueError:
-            return True
+            raise ValueError("Resolved address is not a valid IP")
 
         if (
             addr.is_private
@@ -90,9 +93,25 @@ def _is_private_or_internal(hostname: str) -> bool:
             or addr.is_multicast
             or addr.is_unspecified
         ):
-            return True
+            raise ValueError("Hostname resolves to a private or internal address")
 
-    return False
+        validated_ips.append(ip_str)
+
+    if not validated_ips:
+        raise ValueError("Hostname resolved to no usable addresses")
+
+    return validated_ips
+
+
+def _is_private_or_internal(hostname: str) -> bool:
+    """Check if a hostname resolves to a private/internal IP or matches
+    blocked DNS patterns. Prevents DNS rebinding attacks where a domain
+    could resolve to internal services."""
+    try:
+        _resolve_and_validate(hostname)
+        return False
+    except ValueError:
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -782,21 +801,38 @@ async def get_domain_health(
     cert_valid = False
     keycloak_responding = False
 
-    # DNS rebinding protection: ensure the domain does not resolve to
-    # private/internal IPs (127.*, 10.*, 172.16-31.*, 192.168.*, link-local,
-    # loopback, *.svc.cluster.local, *.local, etc.)
-    if _is_private_or_internal(domain):
+    # DNS rebinding protection: resolve once, validate all IPs are public,
+    # then connect to the validated IP directly to prevent TOCTOU attacks
+    # where DNS could resolve to a different (internal) IP between
+    # validation and connection.
+    try:
+        validated_ips = _resolve_and_validate(domain)
+    except ValueError:
         raise HTTPException(
             status_code=422,
             detail="Domain resolves to a private or internal address",
         )
 
+    # Connect directly to the first validated IP, using the Host header
+    # for correct virtual-host routing and TLS SNI.
+    target_ip = validated_ips[0]
     scheme = "https" if tls_enabled else "http"
-    check_url = f"{scheme}://{domain}/realms/master"
+    check_url = f"{scheme}://{target_ip}/realms/master"
 
     try:
-        async with httpx.AsyncClient(timeout=3.0, follow_redirects=False) as http:
-            resp = await http.get(check_url)
+        transport = httpx.AsyncHTTPTransport(
+            verify=tls_enabled,
+        )
+        async with httpx.AsyncClient(
+            timeout=3.0,
+            follow_redirects=False,
+            transport=transport,
+        ) as http:
+            resp = await http.get(
+                check_url,
+                headers={"Host": domain},
+                extensions={"sni_hostname": domain} if tls_enabled else {},
+            )
             resolves = True
             keycloak_responding = resp.status_code < 500
             if tls_enabled:
@@ -1050,7 +1086,9 @@ async def run_cleanup(valid_realms: List[str]) -> None:
 # Theme routes
 # ---------------------------------------------------------------------------
 @app.get("/v1/themes/{realm}", response_model=ThemeConfig)
+@limiter.limit("120/minute")
 async def get_theme(
+    request: Request,
     realm: str,
     session: AsyncSession = Depends(get_session),
 ):
@@ -1145,6 +1183,7 @@ async def delete_theme(
 # Health
 # ---------------------------------------------------------------------------
 @app.get("/health")
-async def health():
+@limiter.limit("120/minute")
+async def health(request: Request):
     """Return service health status."""
     return {"status": "ok"}

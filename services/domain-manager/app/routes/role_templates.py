@@ -152,7 +152,9 @@ def _template_to_response(template: RoleTemplate) -> RoleTemplateResponse:
 # Routes
 # ---------------------------------------------------------------------------
 @router.get("", response_model=List[RoleTemplateResponse])
+@limiter.limit("60/minute")
 async def list_templates(
+    request: Request,
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(verify_token),
 ):

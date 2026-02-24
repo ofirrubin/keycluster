@@ -2,8 +2,9 @@ import logging
 import os
 import re
 import urllib.parse
+import uuid
 from typing import List, Optional, Set
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from pydantic import BaseModel, field_validator
 import httpx
 
@@ -165,12 +166,26 @@ async def _assign_service_account_roles(
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+_MAX_PAGE_SIZE: int = 100
+
+
 @router.get("", response_model=List[ServiceAccountResponse])
+@limiter.limit("60/minute")
 async def list_service_accounts(
+    request: Request,
     realm: str,
+    first: int = Query(0, ge=0, description="Pagination offset"),
+    max_results: int = Query(
+        _MAX_PAGE_SIZE, ge=1, le=_MAX_PAGE_SIZE, alias="max",
+        description="Maximum number of results to return",
+    ),
     claims: dict = Depends(require_admin),
 ):
-    """List all clients with service accounts enabled in the realm. Admin only."""
+    """List clients with service accounts enabled in the realm. Admin only.
+
+    Supports pagination via ``first`` (offset) and ``max`` (page size, capped
+    at 100) query parameters.
+    """
     validate_realm_name(realm)
 
     headers = await _admin_headers()
@@ -179,6 +194,7 @@ async def list_service_accounts(
     async with httpx.AsyncClient() as http:
         resp = await http.get(
             f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients",
+            params={"first": first, "max": max_results},
             headers=headers,
             timeout=10.0,
         )
@@ -261,9 +277,19 @@ async def create_service_account(
             )
         resp.raise_for_status()
 
-        # Get internal ID from Location header
+        # Get internal ID from Location header and validate UUID format
+        internal_id: Optional[str] = None
         location = resp.headers.get("Location", "")
-        internal_id = location.rsplit("/", 1)[-1] if location else None
+        if location:
+            candidate = location.rsplit("/", 1)[-1]
+            try:
+                uuid.UUID(candidate)
+                internal_id = candidate
+            except ValueError:
+                logger.warning(
+                    "Location header contained invalid UUID: length=%d",
+                    len(candidate),
+                )
 
         if not internal_id:
             internal_id = await _resolve_client_internal_id(

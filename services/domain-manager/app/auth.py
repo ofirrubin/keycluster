@@ -74,13 +74,21 @@ audit_logger = logging.getLogger("audit")
 audit_logger.setLevel(logging.INFO)
 
 
+def _sanitize_log_value(value: str) -> str:
+    """Strip control characters (< 0x20 except space) to prevent log injection."""
+    return "".join(c for c in value if c == " " or (c >= "\x20" and c != "\x7f"))
+
+
 def audit_log(action: str, claims: dict, realm: str = "", details: str = "") -> None:
-    user = claims.get("preferred_username", claims.get("sub", "unknown"))
+    user = _sanitize_log_value(
+        str(claims.get("preferred_username", claims.get("sub", "unknown")))
+    )
+    action = _sanitize_log_value(action)
     msg = f"action={action} user={user}"
     if realm:
-        msg += f" realm={realm}"
+        msg += f" realm={_sanitize_log_value(realm)}"
     if details:
-        msg += f" details={details}"
+        msg += f" details={_sanitize_log_value(details)}"
     audit_logger.info(msg)
 
 
@@ -144,11 +152,12 @@ async def _get_jwks() -> dict:
 
 
 async def _refresh_jwks() -> dict:
-    global _jwks_cache, _jwks_uri_cache
+    global _jwks_cache, _jwks_uri_cache, _jwks_cache_time
     async with _jwks_lock:
         if _jwks_uri_cache is None:
             _jwks_uri_cache = await _fetch_keycloak_jwks_uri()
         _jwks_cache = await _fetch_jwks(_jwks_uri_cache)
+        _jwks_cache_time = time.time()
     return _jwks_cache
 
 
