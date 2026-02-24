@@ -13,6 +13,8 @@ from app.database import get_session
 from app.models.role_template import RoleTemplate
 from app.auth import (
     require_admin,
+    verify_token,
+    introspect_token,
     audit_log,
     validate_realm_name,
     get_keycloak_admin_token,
@@ -152,8 +154,10 @@ def _template_to_response(template: RoleTemplate) -> RoleTemplateResponse:
 @router.get("", response_model=List[RoleTemplateResponse])
 async def list_templates(
     session: AsyncSession = Depends(get_session),
+    claims: dict = Depends(verify_token),
 ):
-    """List all role templates. Public endpoint."""
+    """List all role templates. Requires authentication to prevent leaking
+    security role structure to unauthenticated callers."""
     statement = select(RoleTemplate).order_by(RoleTemplate.name)
     results = await session.execute(statement)
     templates = results.scalars().all()
@@ -246,6 +250,14 @@ async def delete_template(
     claims: dict = Depends(require_admin),
 ):
     """Delete a role template. Cannot delete default templates. Admin only."""
+    # Defense-in-depth: introspect token for destructive operations to catch
+    # revoked tokens within the JWKS cache TTL window.
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token_active = await introspect_token(auth_header[7:])
+        if not token_active:
+            raise HTTPException(status_code=401, detail="Token has been revoked")
+
     result = await session.execute(
         select(RoleTemplate).where(RoleTemplate.id == template_id)
     )

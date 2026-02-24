@@ -2,6 +2,7 @@
 Shared authentication and validation utilities for the domain-manager service.
 Extracted to avoid circular imports between main.py and route modules.
 """
+import asyncio
 import base64
 import json
 import logging
@@ -90,6 +91,7 @@ _jwks_cache: Optional[dict] = None
 _jwks_uri_cache: Optional[str] = None
 _jwks_cache_time: float = 0.0
 _JWKS_CACHE_TTL: float = 300.0  # 5 minutes
+_jwks_lock: asyncio.Lock = asyncio.Lock()
 
 # Rate limiter: track JWKS fetch timestamps (max 10 per 60 seconds)
 _JWKS_MAX_FETCHES_PER_MIN: int = 10
@@ -127,7 +129,14 @@ async def _fetch_jwks(jwks_uri: str) -> dict:
 
 async def _get_jwks() -> dict:
     global _jwks_cache, _jwks_uri_cache, _jwks_cache_time
-    if _jwks_cache is None or (time.time() - _jwks_cache_time) > _JWKS_CACHE_TTL:
+    # Fast path: return cached JWKS without acquiring the lock
+    if _jwks_cache is not None and (time.time() - _jwks_cache_time) <= _JWKS_CACHE_TTL:
+        return _jwks_cache
+    # Slow path: acquire lock so only one coroutine fetches at a time
+    async with _jwks_lock:
+        # Double-check after acquiring the lock (another coroutine may have refreshed)
+        if _jwks_cache is not None and (time.time() - _jwks_cache_time) <= _JWKS_CACHE_TTL:
+            return _jwks_cache
         _jwks_uri_cache = await _fetch_keycloak_jwks_uri()
         _jwks_cache = await _fetch_jwks(_jwks_uri_cache)
         _jwks_cache_time = time.time()
@@ -136,9 +145,10 @@ async def _get_jwks() -> dict:
 
 async def _refresh_jwks() -> dict:
     global _jwks_cache, _jwks_uri_cache
-    if _jwks_uri_cache is None:
-        _jwks_uri_cache = await _fetch_keycloak_jwks_uri()
-    _jwks_cache = await _fetch_jwks(_jwks_uri_cache)
+    async with _jwks_lock:
+        if _jwks_uri_cache is None:
+            _jwks_uri_cache = await _fetch_keycloak_jwks_uri()
+        _jwks_cache = await _fetch_jwks(_jwks_uri_cache)
     return _jwks_cache
 
 
@@ -267,11 +277,35 @@ _ADMIN_CLIENT_ID: str = os.getenv("KEYCLOAK_ADMIN_CLIENT_ID", "")
 _ADMIN_CLIENT_SECRET: str = os.getenv("KEYCLOAK_ADMIN_CLIENT_SECRET", "")
 _USE_CLIENT_CREDENTIALS: bool = bool(_ADMIN_CLIENT_ID and _ADMIN_CLIENT_SECRET)
 
+# KEYCLOAK_AUTH_MODE controls which grant types are attempted:
+#   "auto"               - try client_credentials first, fall back to password (dev only)
+#   "client_credentials" - only client_credentials, never fall back to password
+# In production, password grant fallback is never allowed regardless of this setting.
+_KEYCLOAK_AUTH_MODE: str = os.getenv("KEYCLOAK_AUTH_MODE", "auto").lower()
+_IS_PRODUCTION: bool = os.getenv("ENVIRONMENT", "production").lower() != "dev"
+
+if _KEYCLOAK_AUTH_MODE not in ("auto", "client_credentials"):
+    logger.critical("KEYCLOAK_AUTH_MODE must be 'auto' or 'client_credentials', got '%s'", _KEYCLOAK_AUTH_MODE)
+    sys.exit(1)
+
+# In production with auth_mode=auto, password fallback is still blocked.
+# Only in non-production + auto mode is the fallback allowed.
+_ALLOW_PASSWORD_FALLBACK: bool = (
+    _KEYCLOAK_AUTH_MODE == "auto" and not _IS_PRODUCTION
+)
+
 if not _USE_CLIENT_CREDENTIALS:
-    logger.warning(
-        "Using password grant for admin API. Consider switching to "
-        "client_credentials with a scoped service account client."
-    )
+    if _IS_PRODUCTION:
+        logger.critical(
+            "KEYCLOAK_ADMIN_CLIENT_ID and KEYCLOAK_ADMIN_CLIENT_SECRET are required in production. "
+            "Password grant fallback is not allowed."
+        )
+        sys.exit(1)
+    else:
+        logger.warning(
+            "Using password grant for admin API. This is only acceptable in development. "
+            "Set KEYCLOAK_ADMIN_CLIENT_ID and KEYCLOAK_ADMIN_CLIENT_SECRET for production."
+        )
 
 
 async def _get_token_via_client_credentials() -> Optional[str]:
@@ -298,7 +332,10 @@ async def _get_token_via_client_credentials() -> Optional[str]:
 
 
 async def _get_token_via_password() -> Optional[str]:
-    """Obtain an admin token using password grant (legacy, master realm super-admin)."""
+    """Obtain an admin token using password grant (legacy, master realm super-admin).
+
+    Only allowed in development environments with KEYCLOAK_AUTH_MODE=auto.
+    """
     username: str = os.getenv("KEYCLOAK_ADMIN", "")
     password: str = os.getenv("KEYCLOAK_ADMIN_PASSWORD", "")
     if not username or not password:
@@ -332,9 +369,70 @@ async def get_keycloak_admin_token() -> Optional[str]:
 
     Prefers client_credentials grant when KEYCLOAK_ADMIN_CLIENT_ID and
     KEYCLOAK_ADMIN_CLIENT_SECRET are set (scoped service account, lower blast
-    radius). Falls back to password grant with KEYCLOAK_ADMIN /
-    KEYCLOAK_ADMIN_PASSWORD for backward compatibility.
+    radius). Falls back to password grant ONLY in development environments
+    with KEYCLOAK_AUTH_MODE=auto.
     """
     if _USE_CLIENT_CREDENTIALS:
-        return await _get_token_via_client_credentials()
+        token = await _get_token_via_client_credentials()
+        if token is not None:
+            return token
+        # client_credentials failed; only fall back if explicitly allowed
+        if not _ALLOW_PASSWORD_FALLBACK:
+            logger.error("client_credentials grant failed and password fallback is disabled")
+            return None
+        logger.warning("client_credentials grant failed, falling back to password grant (dev only)")
+
+    if not _ALLOW_PASSWORD_FALLBACK:
+        logger.error("Password grant fallback is disabled (production or KEYCLOAK_AUTH_MODE=client_credentials)")
+        return None
+
     return await _get_token_via_password()
+
+
+# ---------------------------------------------------------------------------
+# Token introspection (defense-in-depth for destructive operations)
+# ---------------------------------------------------------------------------
+async def introspect_token(token: str) -> bool:
+    """Introspect a token against Keycloak to verify it has not been revoked.
+
+    Used as defense-in-depth on destructive (DELETE) endpoints. Within the JWKS
+    cache TTL window, a revoked token would still pass local JWT validation.
+    Introspection catches this by checking the token's active status server-side.
+
+    Returns True if the token is active, False otherwise.
+    """
+    # Introspection requires client credentials to authenticate the request
+    if not _ADMIN_CLIENT_ID or not _ADMIN_CLIENT_SECRET:
+        # Cannot introspect without client credentials; log and allow
+        # (the JWT was already validated locally)
+        logger.warning(
+            "Token introspection skipped: KEYCLOAK_ADMIN_CLIENT_ID/SECRET not configured"
+        )
+        return True
+
+    encoded_realm = urllib.parse.quote(KEYCLOAK_REALM, safe="")
+    introspect_url = (
+        f"{KEYCLOAK_SERVER_URL}/realms/{encoded_realm}/protocol/openid-connect/token/introspect"
+    )
+
+    try:
+        async with httpx.AsyncClient() as http:
+            resp = await http.post(
+                introspect_url,
+                data={
+                    "token": token,
+                    "client_id": _ADMIN_CLIENT_ID,
+                    "client_secret": _ADMIN_CLIENT_SECRET,
+                },
+                timeout=5.0,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            return result.get("active", False)
+    except Exception as e:
+        logger.error(
+            "Token introspection failed: exc_type=%s", type(e).__name__
+        )
+        # Fail open: if introspection is unavailable, rely on local JWT validation.
+        # This is a defense-in-depth measure, not the primary auth gate.
+        return True

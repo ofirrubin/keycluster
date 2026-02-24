@@ -1,7 +1,9 @@
 import asyncio
+import ipaddress
 import logging
 import os
 import re
+import socket
 import urllib.parse
 import httpx
 from typing import List, Optional
@@ -26,6 +28,8 @@ from app.auth import (
     validate_hex_color as _validate_hex_color,
     audit_log as _audit_log_raw,
     get_keycloak_admin_token as get_keycloak_token,
+    introspect_token,
+    verify_token,
 )
 from app.routes.role_templates import router as role_templates_router
 from app.routes.service_accounts import router as service_accounts_router
@@ -42,6 +46,53 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 NAMESPACE = "keycloak"
 INGRESS_CLASS = "nginx"
+_HSTS_MAX_AGE_CAP: int = 63072000  # 2 years, the max recommended value
+
+
+# ---------------------------------------------------------------------------
+# DNS rebinding protection
+# ---------------------------------------------------------------------------
+_BLOCKED_DOMAIN_SUFFIXES = (".svc.cluster.local", ".local")
+
+
+def _is_private_or_internal(hostname: str) -> bool:
+    """Check if a hostname resolves to a private/internal IP or matches
+    blocked DNS patterns. Prevents DNS rebinding attacks where a domain
+    could resolve to internal services."""
+    lower = hostname.lower()
+
+    # Block well-known internal hostnames
+    if lower in ("localhost",):
+        return True
+    for suffix in _BLOCKED_DOMAIN_SUFFIXES:
+        if lower.endswith(suffix):
+            return True
+
+    # Resolve the hostname and check all resulting IPs
+    try:
+        addrinfos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+    except socket.gaierror:
+        # Cannot resolve; not necessarily internal, but treat as unsafe
+        return True
+
+    for family, _type, _proto, _canonname, sockaddr in addrinfos:
+        ip_str = sockaddr[0]
+        try:
+            addr = ipaddress.ip_address(ip_str)
+        except ValueError:
+            return True
+
+        if (
+            addr.is_private
+            or addr.is_loopback
+            or addr.is_link_local
+            or addr.is_reserved
+            or addr.is_multicast
+            or addr.is_unspecified
+        ):
+            return True
+
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -216,6 +267,10 @@ class DomainMappingSchema(BaseModel):
     def validate_hsts_max_age(cls, v: int) -> int:
         if v < 0:
             raise ValueError("hsts_max_age must be non-negative")
+        if v > _HSTS_MAX_AGE_CAP:
+            raise ValueError(
+                f"hsts_max_age must not exceed {_HSTS_MAX_AGE_CAP} (2 years)"
+            )
         return v
 
     @field_validator("csp_allowed_origins")
@@ -280,6 +335,10 @@ class BulkDomainMappingItem(BaseModel):
     def validate_hsts_max_age(cls, v: int) -> int:
         if v < 0:
             raise ValueError("hsts_max_age must be non-negative")
+        if v > _HSTS_MAX_AGE_CAP:
+            raise ValueError(
+                f"hsts_max_age must not exceed {_HSTS_MAX_AGE_CAP} (2 years)"
+            )
         return v
 
     @field_validator("csp_allowed_origins")
@@ -379,6 +438,18 @@ app.include_router(cluster_router, prefix="/v1/cluster")
 # ---------------------------------------------------------------------------
 # Keycloak admin helpers
 # ---------------------------------------------------------------------------
+def _log_task_exception(task: asyncio.Task) -> None:
+    """Callback for fire-and-forget tasks to log unhandled exceptions."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error(
+            "Background task '%s' failed: exc_type=%s",
+            task.get_name(), type(exc).__name__,
+        )
+
+
 async def patch_realm_security_headers(
     realm: str,
     allowed_origins: List[str],
@@ -600,15 +671,17 @@ async def sync_domain(
             else:
                 raise
 
-        # 3. Patch Realm Headers
-        asyncio.create_task(
+        # 3. Patch Realm Headers (fire-and-forget with error logging)
+        task = asyncio.create_task(
             patch_realm_security_headers(
                 mapping.realm,
                 mapping.csp_allowed_origins,
                 mapping.ssl_required,
                 mapping.hsts_max_age,
-            )
+            ),
+            name=f"patch_security_headers:{mapping.realm}",
         )
+        task.add_done_callback(_log_task_exception)
 
     except ApiException as e:
         logger.error("Kubernetes API Error: status=%s", e.status)
@@ -651,9 +724,26 @@ async def delete_domain(
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),
 ):
-    """Delete a domain mapping for a realm."""
+    """Delete a domain mapping for a realm.
+
+    Deletes the Ingress resource FIRST to prevent subdomain takeover via a
+    dangling Ingress, then removes the DB record.
+    """
     _validate_realm_name(realm)
 
+    # Defense-in-depth: introspect token for destructive operations to catch
+    # revoked tokens within the JWKS cache TTL window.
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token_active = await introspect_token(auth_header[7:])
+        if not token_active:
+            raise HTTPException(status_code=401, detail="Token has been revoked")
+
+    # 1. Delete Ingress FIRST to avoid dangling Ingress (subdomain takeover risk)
+    api = await get_kubernetes_client()
+    result = await delete_domain_ingress(realm, api)
+
+    # 2. Delete DB record AFTER Ingress is gone
     statement = select(DomainMappingModel).where(DomainMappingModel.realm == realm)
     results = await session.execute(statement)
     db_mapping = results.scalar_one_or_none()
@@ -662,9 +752,8 @@ async def delete_domain(
         await session.delete(db_mapping)
         await session.commit()
 
-    api = await get_kubernetes_client()
     _audit_log("domain_delete", realm, claims)
-    return await delete_domain_ingress(realm, api)
+    return result
 
 
 @app.get("/v1/domains/{realm}/health")
@@ -692,6 +781,15 @@ async def get_domain_health(
     resolves = False
     cert_valid = False
     keycloak_responding = False
+
+    # DNS rebinding protection: ensure the domain does not resolve to
+    # private/internal IPs (127.*, 10.*, 172.16-31.*, 192.168.*, link-local,
+    # loopback, *.svc.cluster.local, *.local, etc.)
+    if _is_private_or_internal(domain):
+        raise HTTPException(
+            status_code=422,
+            detail="Domain resolves to a private or internal address",
+        )
 
     scheme = "https" if tls_enabled else "http"
     check_url = f"{scheme}://{domain}/realms/master"
@@ -833,7 +931,7 @@ async def bulk_create_domains(
     # ------------------------------------------------------------------
     for item in body.mappings:
         if item.enabled:
-            asyncio.create_task(
+            task = asyncio.create_task(
                 _sync_ingress_for_realm(
                     realm=item.realm,
                     domain=item.domain,
@@ -842,8 +940,10 @@ async def bulk_create_domains(
                     csp_allowed_origins=item.csp_allowed_origins,
                     ssl_required=item.ssl_required,
                     hsts_max_age=item.hsts_max_age,
-                )
+                ),
+                name=f"sync_ingress:{item.realm}",
             )
+            task.add_done_callback(_log_task_exception)
 
     _audit_log(
         "domain_bulk_create",
@@ -1017,6 +1117,13 @@ async def delete_theme(
 ):
     """Delete persisted theme for a realm, resetting to defaults."""
     _validate_realm_name(realm)
+
+    # Defense-in-depth: introspect token for destructive operations
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token_active = await introspect_token(auth_header[7:])
+        if not token_active:
+            raise HTTPException(status_code=401, detail="Token has been revoked")
 
     statement = select(RealmTheme).where(RealmTheme.realm == realm)
     results = await session.execute(statement)

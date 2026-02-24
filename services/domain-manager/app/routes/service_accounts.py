@@ -9,6 +9,7 @@ import httpx
 
 from app.auth import (
     require_admin,
+    introspect_token,
     audit_log,
     validate_realm_name,
     get_keycloak_admin_token,
@@ -302,6 +303,14 @@ async def delete_service_account(
 ):
     """Delete a service account client from the realm. Admin only."""
     validate_realm_name(realm)
+
+    # Defense-in-depth: introspect token for destructive operations to catch
+    # revoked tokens within the JWKS cache TTL window.
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token_active = await introspect_token(auth_header[7:])
+        if not token_active:
+            raise HTTPException(status_code=401, detail="Token has been revoked")
 
     if not _CLIENT_ID_PATTERN.match(client_id):
         raise HTTPException(status_code=400, detail="Invalid client_id format")
