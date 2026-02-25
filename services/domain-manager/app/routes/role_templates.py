@@ -32,6 +32,9 @@ _TEMPLATE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,98}[a-zA-Z0-9]
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
+_PERMISSION_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:.]{1,100}$")
+
+
 class RoleDefinition(BaseModel):
     name: str
     description: str = ""
@@ -52,6 +55,28 @@ class RoleDefinition(BaseModel):
     def validate_description(cls, v: str) -> str:
         if len(v) > 500:
             raise ValueError("Role description must be under 500 characters")
+        return v
+
+    @field_validator("composite_roles")
+    @classmethod
+    def validate_composite_roles(cls, v: List[str]) -> List[str]:
+        if len(v) > 50:
+            raise ValueError("A role must not reference more than 50 composite roles")
+        for name in v:
+            if not re.match(r"^[a-zA-Z0-9_-]{1,100}$", name):
+                raise ValueError("Composite role names must be 1-100 alphanumeric characters, hyphens, or underscores")
+        return v
+
+    @field_validator("permissions")
+    @classmethod
+    def validate_permissions(cls, v: List[str]) -> List[str]:
+        if len(v) > 200:
+            raise ValueError("A role must not have more than 200 permissions")
+        for perm in v:
+            if not _PERMISSION_NAME_PATTERN.match(perm):
+                raise ValueError(
+                    "Permission names must be 1-100 characters: alphanumeric, hyphens, underscores, colons, or dots"
+                )
         return v
 
 
@@ -81,6 +106,8 @@ class RoleTemplateCreate(BaseModel):
     def validate_roles_nonempty(cls, v: List[RoleDefinition]) -> List[RoleDefinition]:
         if not v:
             raise ValueError("At least one role is required")
+        if len(v) > 100:
+            raise ValueError("A role template must not contain more than 100 roles")
         names = [r.name for r in v]
         if len(names) != len(set(names)):
             raise ValueError("Duplicate role names are not allowed")
@@ -116,6 +143,8 @@ class RoleTemplateUpdate(BaseModel):
         if v is not None:
             if not v:
                 raise ValueError("At least one role is required")
+            if len(v) > 100:
+                raise ValueError("A role template must not contain more than 100 roles")
             names = [r.name for r in v]
             if len(names) != len(set(names)):
                 raise ValueError("Duplicate role names are not allowed")
@@ -180,7 +209,7 @@ async def create_template(
     )
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(
-            status_code=409, detail=f"Template '{body.name}' already exists"
+            status_code=409, detail="A template with this name already exists"
         )
 
     template = RoleTemplate(
@@ -225,7 +254,7 @@ async def update_template(
             if dup.scalar_one_or_none() is not None:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"Template '{body.name}' already exists",
+                    detail="A template with this name already exists",
                 )
         template.name = body.name
 

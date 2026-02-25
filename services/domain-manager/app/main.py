@@ -4,17 +4,20 @@ import logging
 import os
 import re
 import socket
+import sys
 import urllib.parse
 import httpx
 from typing import List, Optional
 from datetime import datetime, timezone
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, field_validator
 from kubernetes_asyncio import client, config
 from kubernetes_asyncio.client.rest import ApiException
 from sqlmodel import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_session
@@ -42,11 +45,13 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# Configuration
+# Configuration (environment-first, safe defaults)
 # ---------------------------------------------------------------------------
-NAMESPACE = "keycloak"
-INGRESS_CLASS = "nginx"
-_HSTS_MAX_AGE_CAP: int = 63072000  # 2 years, the max recommended value
+NAMESPACE: str = os.environ.get("K8S_NAMESPACE", "keycloak")
+INGRESS_CLASS: str = os.environ.get("INGRESS_CLASS", "nginx")
+_HSTS_MAX_AGE_CAP: int = int(os.environ.get("HSTS_MAX_AGE_CAP", "63072000"))  # 2 years default
+_KEYCLOAK_TIMEOUT: float = float(os.environ.get("KEYCLOAK_TIMEOUT", "5.0"))
+_HEALTH_CHECK_TIMEOUT: float = float(os.environ.get("HEALTH_CHECK_TIMEOUT", "3.0"))
 
 
 # ---------------------------------------------------------------------------
@@ -55,12 +60,14 @@ _HSTS_MAX_AGE_CAP: int = 63072000  # 2 years, the max recommended value
 _BLOCKED_DOMAIN_SUFFIXES = (".svc.cluster.local", ".local")
 
 
-def _resolve_and_validate(hostname: str) -> List[str]:
+async def _resolve_and_validate(hostname: str) -> List[str]:
     """Resolve a hostname and validate that all IPs are public.
 
     Returns a list of validated public IP strings.
     Raises ValueError if the hostname is internal, unresolvable, or resolves
     to any private/reserved IP.
+
+    Uses async DNS resolution to avoid blocking the event loop.
     """
     lower = hostname.lower()
 
@@ -71,9 +78,10 @@ def _resolve_and_validate(hostname: str) -> List[str]:
         if lower.endswith(suffix):
             raise ValueError("Hostname matches a blocked internal suffix")
 
-    # Resolve the hostname and check all resulting IPs
+    # Resolve the hostname asynchronously and check all resulting IPs
+    loop = asyncio.get_running_loop()
     try:
-        addrinfos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
+        addrinfos = await loop.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
     except socket.gaierror:
         raise ValueError("Hostname cannot be resolved")
 
@@ -103,12 +111,12 @@ def _resolve_and_validate(hostname: str) -> List[str]:
     return validated_ips
 
 
-def _is_private_or_internal(hostname: str) -> bool:
+async def _is_private_or_internal(hostname: str) -> bool:
     """Check if a hostname resolves to a private/internal IP or matches
     blocked DNS patterns. Prevents DNS rebinding attacks where a domain
     could resolve to internal services."""
     try:
-        _resolve_and_validate(hostname)
+        await _resolve_and_validate(hostname)
         return False
     except ValueError:
         return True
@@ -207,6 +215,10 @@ class ThemeConfig(BaseModel):
                 raise ValueError("customCss must not contain url() functions")
             if "javascript:" in lower:
                 raise ValueError("customCss must not contain javascript: URIs")
+            if "behavior:" in lower or "-moz-binding:" in lower:
+                raise ValueError("customCss must not contain behavior or binding directives")
+            if "<script" in lower or "onerror" in lower or "onload" in lower:
+                raise ValueError("CSS fields must not contain HTML/script content")
         return v
 
     @field_validator("fontFamily")
@@ -214,7 +226,7 @@ class ThemeConfig(BaseModel):
     def validate_font_family(cls, v: str) -> str:
         if len(v) > 200:
             raise ValueError("fontFamily must be under 200 characters")
-        if any(c in v for c in ("<", ">", "{", "}", ";", "(", ")", "\\", "'", '"')):
+        if not re.match(r'^[a-zA-Z0-9\s,\-]+$', v):
             raise ValueError("fontFamily contains disallowed characters")
         return v
 
@@ -237,6 +249,10 @@ class ThemeConfig(BaseModel):
                 raise ValueError("backgroundCss must not contain url() functions")
             if "javascript:" in lower:
                 raise ValueError("backgroundCss must not contain javascript: URIs")
+            if "behavior:" in lower or "-moz-binding:" in lower:
+                raise ValueError("backgroundCss must not contain behavior or binding directives")
+            if "<script" in lower or "onerror" in lower or "onload" in lower:
+                raise ValueError("CSS fields must not contain HTML/script content")
         return v
 
     @field_validator("backgroundUrl", "logoUrl")
@@ -247,6 +263,11 @@ class ThemeConfig(BaseModel):
                 raise ValueError("URLs must use HTTPS")
             if len(v) > 2048:
                 raise ValueError("URL must be under 2048 characters")
+            parsed = urllib.parse.urlparse(v)
+            if parsed.hostname:
+                hn = parsed.hostname.lower()
+                if hn in ("localhost",) or hn.endswith((".local", ".internal", ".svc.cluster.local")):
+                    raise ValueError("URL hostname must not be internal")
         return v
 
 
@@ -295,6 +316,8 @@ class DomainMappingSchema(BaseModel):
     @field_validator("csp_allowed_origins")
     @classmethod
     def validate_origins(cls, v: List[str]) -> List[str]:
+        if v and len(v) > 50:
+            raise ValueError("csp_allowed_origins must not contain more than 50 entries")
         validated: List[str] = []
         blocked_csp_keywords = ("unsafe-inline", "unsafe-eval", "unsafe-hashes",
                                 "data:", "blob:", "mediastream:", "filesystem:",
@@ -308,6 +331,11 @@ class DomainMappingSchema(BaseModel):
             lower = origin.lower()
             if any(kw in lower for kw in blocked_csp_keywords):
                 raise ValueError("Origins cannot contain CSP directive keywords")
+            # Reject wildcard subdomains (e.g. *.example.com) -- only explicit
+            # fully-qualified origins are acceptable in CSP headers.
+            parsed_origin = urllib.parse.urlparse(origin)
+            if parsed_origin.hostname and "*" in parsed_origin.hostname:
+                raise ValueError("Wildcard origins are not allowed; use explicit domains")
             validated.append(origin)
         return validated
 
@@ -363,6 +391,8 @@ class BulkDomainMappingItem(BaseModel):
     @field_validator("csp_allowed_origins")
     @classmethod
     def validate_origins(cls, v: List[str]) -> List[str]:
+        if v and len(v) > 50:
+            raise ValueError("csp_allowed_origins must not contain more than 50 entries")
         validated: List[str] = []
         blocked_csp_keywords = ("unsafe-inline", "unsafe-eval", "unsafe-hashes",
                                 "data:", "blob:", "mediastream:", "filesystem:",
@@ -376,6 +406,11 @@ class BulkDomainMappingItem(BaseModel):
             lower = origin.lower()
             if any(kw in lower for kw in blocked_csp_keywords):
                 raise ValueError("Origins cannot contain CSP directive keywords")
+            # Reject wildcard subdomains (e.g. *.example.com) -- only explicit
+            # fully-qualified origins are acceptable in CSP headers.
+            parsed_origin = urllib.parse.urlparse(origin)
+            if parsed_origin.hostname and "*" in parsed_origin.hostname:
+                raise ValueError("Wildcard origins are not allowed; use explicit domains")
             validated.append(origin)
         return validated
 
@@ -405,6 +440,9 @@ class BulkDomainRequest(BaseModel):
         realms = [m.realm for m in v]
         if len(realms) != len(set(realms)):
             raise ValueError("Duplicate realms are not allowed in a bulk request")
+        domains = [m.domain for m in v]
+        if len(domains) != len(set(domains)):
+            raise ValueError("Duplicate domains are not allowed")
         return v
 
 
@@ -435,10 +473,48 @@ app.state.limiter = limiter
 
 @app.exception_handler(RateLimitExceeded)
 async def _rate_limit_handler(request: Request, exc: RateLimitExceeded):
-    return JSONResponse(status_code=429, content={"error": "Rate limit exceeded"})
+    return JSONResponse(
+        status_code=429,
+        content={"error": {"code": "RATE_LIMIT_EXCEEDED", "message": "Rate limit exceeded"}},
+    )
+
+
+@app.exception_handler(RequestValidationError)
+async def _validation_handler(request: Request, exc: RequestValidationError):
+    logger.warning("Validation error: exc_type=%s", type(exc).__name__)
+    return JSONResponse(
+        status_code=400,
+        content={"error": {"code": "VALIDATION_ERROR", "message": "Invalid request body"}},
+    )
+
+
+@app.exception_handler(HTTPException)
+async def _http_exception_handler(request: Request, exc: HTTPException):
+    """Standardize all HTTPException responses to a consistent structure."""
+    message = exc.detail if isinstance(exc.detail, str) else "Request failed"
+    content = {"error": {"code": "REQUEST_ERROR", "message": message}}
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=content,
+    )
+
+
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request: Request, exc: Exception):
+    logger.error("Unhandled exception: exc_type=%s", type(exc).__name__)
+    return JSONResponse(
+        status_code=500,
+        content={"error": {"code": "INTERNAL_ERROR", "message": "Internal server error"}},
+    )
 
 _cors_origin = os.getenv("CORS_ALLOWED_ORIGIN", "")
 _cors_origins = [o.strip() for o in _cors_origin.split(",") if o.strip()] if _cors_origin else []
+
+if not _is_dev:
+    for _origin in _cors_origins:
+        if _origin == "*" or "localhost" in _origin or "127.0.0.1" in _origin:
+            logger.critical("Wildcard or localhost CORS origin not allowed in production: %s", _origin)
+            sys.exit(1)
 
 app.add_middleware(
     CORSMiddleware,
@@ -505,7 +581,7 @@ async def patch_realm_security_headers(
                 f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}",
                 json=payload,
                 headers=headers,
-                timeout=5.0,
+                timeout=_KEYCLOAK_TIMEOUT,
             )
             resp.raise_for_status()
             logger.info("Successfully patched security headers for realm '%s'", realm)
@@ -575,7 +651,16 @@ def generate_ingress_manifest(
         "nginx.ingress.kubernetes.io/proxy-buffer-size": "128k",
         "nginx.ingress.kubernetes.io/use-regex": "true",
         "nginx.ingress.kubernetes.io/ssl-redirect": "true" if tls_enabled else "false",
+        "nginx.ingress.kubernetes.io/configuration-snippet": (
+            'more_set_headers "X-Content-Type-Options: nosniff";\n'
+            'more_set_headers "X-Frame-Options: DENY";'
+        ),
     }
+
+    if tls_enabled:
+        annotations["nginx.ingress.kubernetes.io/configuration-snippet"] += (
+            '\nmore_set_headers "Strict-Transport-Security: max-age=31536000; includeSubDomains";'
+        )
 
     spec: dict = {
         "ingressClassName": INGRESS_CLASS,
@@ -642,6 +727,10 @@ async def sync_domain(
         _audit_log("domain_disable", mapping.realm, claims, f"domain={mapping.domain}")
         return await delete_domain_ingress(mapping.realm, api)
 
+    # SSRF/DNS validation: reject domains that resolve to private/internal addresses
+    if await _is_private_or_internal(mapping.domain):
+        raise HTTPException(status_code=422, detail="Domain points to a private or internal address")
+
     csp_csv = ",".join(mapping.csp_allowed_origins)
 
     if not db_mapping:
@@ -668,7 +757,16 @@ async def sync_domain(
         db_mapping.updated_at = datetime.now(timezone.utc)
         _audit_log("domain_update", mapping.realm, claims, f"domain={mapping.domain}")
 
-    await session.commit()
+    try:
+        await session.commit()
+    except IntegrityError as e:
+        await session.rollback()
+        pgcode = getattr(getattr(e, "orig", None), "pgcode", None)
+        if pgcode == "23505":
+            logger.warning("Domain mapping conflict: exc_type=%s", type(e).__name__)
+            raise HTTPException(status_code=409, detail="Domain mapping already exists")
+        logger.error("Domain mapping integrity error: exc_type=%s", type(e).__name__)
+        raise HTTPException(status_code=500, detail="Database operation failed")
     await session.refresh(db_mapping)
 
     # 2. Update Kubernetes
@@ -792,7 +890,7 @@ async def get_domain_health(
 
     if db_mapping is None:
         raise HTTPException(
-            status_code=404, detail=f"No domain mapping found for realm '{realm}'"
+            status_code=404, detail="Domain mapping not found"
         )
 
     domain = db_mapping.domain
@@ -806,7 +904,7 @@ async def get_domain_health(
     # where DNS could resolve to a different (internal) IP between
     # validation and connection.
     try:
-        validated_ips = _resolve_and_validate(domain)
+        validated_ips = await _resolve_and_validate(domain)
     except ValueError:
         raise HTTPException(
             status_code=422,
@@ -824,7 +922,7 @@ async def get_domain_health(
             verify=tls_enabled,
         )
         async with httpx.AsyncClient(
-            timeout=3.0,
+            timeout=_HEALTH_CHECK_TIMEOUT,
             follow_redirects=False,
             transport=transport,
         ) as http:
@@ -889,6 +987,11 @@ async def bulk_create_domains(
     # ------------------------------------------------------------------
     existing_mappings: dict[str, Optional[DomainMappingModel]] = {}
     for item in body.mappings:
+        # SSRF/DNS validation: reject domains that resolve to private/internal addresses
+        if item.enabled and await _is_private_or_internal(item.domain):
+            errors.append({"realm": item.realm, "error": "Domain points to a private or internal address"})
+            continue
+
         try:
             statement = select(DomainMappingModel).where(
                 DomainMappingModel.realm == item.realm
@@ -903,9 +1006,9 @@ async def bulk_create_domains(
             errors.append({"realm": item.realm, "error": "Validation failed"})
 
     if errors:
-        raise HTTPException(
+        return JSONResponse(
             status_code=422,
-            detail={"message": "Validation failed for one or more mappings", "errors": errors},
+            content={"error": {"code": "VALIDATION_ERROR", "message": "Validation failed for one or more mappings", "errors": errors}},
         )
 
     # ------------------------------------------------------------------
@@ -942,6 +1045,20 @@ async def bulk_create_domains(
     # ------------------------------------------------------------------
     try:
         await session.commit()
+    except IntegrityError as e:
+        await session.rollback()
+        pgcode = getattr(getattr(e, "orig", None), "pgcode", None)
+        if pgcode == "23505":
+            logger.warning("Bulk domain commit conflict: exc_type=%s", type(e).__name__)
+            raise HTTPException(
+                status_code=409,
+                detail="Duplicate domain mapping conflict",
+            ) from e
+        logger.error("Bulk domain commit integrity error: exc_type=%s", type(e).__name__)
+        raise HTTPException(
+            status_code=500,
+            detail="Database commit failed",
+        ) from e
     except Exception as e:
         await session.rollback()
         logger.error("Bulk domain commit failed: exc_type=%s", type(e).__name__)
@@ -1120,6 +1237,22 @@ async def save_theme(
 ):
     """Save or update theme configuration for a realm."""
     _validate_realm_name(realm)
+
+    # SSRF defense: resolve theme URL hostnames and reject any that point to
+    # private/internal IPs. The synchronous Pydantic validator can only check
+    # hostname strings; actual DNS resolution must happen async here.
+    for url_field in ("logoUrl", "backgroundUrl"):
+        url_val = getattr(theme_config, url_field, None)
+        if url_val is not None:
+            parsed = urllib.parse.urlparse(url_val)
+            if parsed.hostname:
+                try:
+                    await _resolve_and_validate(parsed.hostname)
+                except ValueError:
+                    raise HTTPException(
+                        status_code=422,
+                        detail=f"{url_field} resolves to a private or internal address",
+                    )
 
     statement = select(RealmTheme).where(RealmTheme.realm == realm)
     results = await session.execute(statement)

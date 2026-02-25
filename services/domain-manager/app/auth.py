@@ -412,6 +412,9 @@ async def introspect_token(token: str) -> bool:
     """
     # Introspection requires client credentials to authenticate the request
     if not _ADMIN_CLIENT_ID or not _ADMIN_CLIENT_SECRET:
+        if _IS_PRODUCTION:
+            logger.critical("Token introspection credentials required in production")
+            raise HTTPException(status_code=500, detail="Service misconfigured")
         # Cannot introspect without client credentials; log and allow
         # (the JWT was already validated locally)
         logger.warning(

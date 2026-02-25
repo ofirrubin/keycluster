@@ -65,9 +65,11 @@ class ServiceAccountCreate(BaseModel):
     @field_validator("roles")
     @classmethod
     def validate_roles(cls, v: List[str]) -> List[str]:
+        if len(v) > 100:
+            raise ValueError("A service account must not have more than 100 roles")
         for role in v:
             if not re.match(r"^[a-zA-Z0-9_-]{1,100}$", role):
-                raise ValueError(f"Invalid role name: {role}")
+                raise ValueError("Invalid role name format")
         return v
 
 
@@ -112,14 +114,21 @@ async def _resolve_client_internal_id(
         headers=headers,
         timeout=10.0,
     )
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "Failed to resolve client: exc_type=%s status=%s",
+            type(exc).__name__, exc.response.status_code,
+        )
+        raise HTTPException(status_code=502, detail="Keycloak operation failed")
     matches = resp.json()
 
     for m in matches:
         if m["clientId"] == client_id:
             return m["id"]
 
-    raise HTTPException(status_code=404, detail=f"Client '{client_id}' not found")
+    raise HTTPException(status_code=404, detail="Client not found")
 
 
 async def _assign_service_account_roles(
@@ -136,7 +145,14 @@ async def _assign_service_account_roles(
         headers=headers,
         timeout=10.0,
     )
-    sa_resp.raise_for_status()
+    try:
+        sa_resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "Failed to get service account user: exc_type=%s status=%s",
+            type(exc).__name__, exc.response.status_code,
+        )
+        raise HTTPException(status_code=502, detail="Keycloak operation failed")
     sa_user_id = sa_resp.json()["id"]
 
     role_payloads = []
@@ -148,9 +164,16 @@ async def _assign_service_account_roles(
             timeout=10.0,
         )
         if role_resp.status_code == 404:
-            logger.warning("Role '%s' not found in realm '%s', skipping", rn, realm)
+            logger.warning("Role not found in realm, skipping: exc_type=NotFound")
             continue
-        role_resp.raise_for_status()
+        try:
+            role_resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to fetch role: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
         role_payloads.append(role_resp.json())
 
     if role_payloads:
@@ -160,7 +183,14 @@ async def _assign_service_account_roles(
             headers=headers,
             timeout=10.0,
         )
-        assign_resp.raise_for_status()
+        try:
+            assign_resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to assign roles: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +230,16 @@ async def list_service_accounts(
         )
         if resp.status_code == 404:
             raise HTTPException(
-                status_code=404, detail=f"Realm '{realm}' not found"
+                status_code=404, detail="Realm not found"
             )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to list clients: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
         clients = resp.json()
 
     result: List[ServiceAccountResponse] = []
@@ -240,7 +277,7 @@ async def create_service_account(
         if disallowed:
             raise HTTPException(
                 status_code=403,
-                detail=f"Roles not permitted by allowlist: {', '.join(disallowed)}",
+                detail="Some requested roles are not permitted",
             )
 
     headers = await _admin_headers()
@@ -269,13 +306,20 @@ async def create_service_account(
         if resp.status_code == 409:
             raise HTTPException(
                 status_code=409,
-                detail=f"Client '{body.client_id}' already exists",
+                detail="Client already exists",
             )
         if resp.status_code == 404:
             raise HTTPException(
-                status_code=404, detail=f"Realm '{realm}' not found"
+                status_code=404, detail="Realm not found"
             )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to create client: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
 
         # Get internal ID from Location header and validate UUID format
         internal_id: Optional[str] = None
@@ -302,7 +346,14 @@ async def create_service_account(
             headers=headers,
             timeout=10.0,
         )
-        secret_resp.raise_for_status()
+        try:
+            secret_resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to fetch client secret: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
         secret = secret_resp.json().get("value", "")
 
         # Assign roles if requested
@@ -356,7 +407,14 @@ async def delete_service_account(
         )
         if resp.status_code == 404:
             raise HTTPException(status_code=404, detail="Client not found")
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to delete client: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
 
     audit_log(
         "service_account_delete", claims, realm=realm,
@@ -393,7 +451,14 @@ async def rotate_client_secret(
             headers=headers,
             timeout=10.0,
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to rotate client secret: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
         new_secret = resp.json().get("value", "")
 
     audit_log(

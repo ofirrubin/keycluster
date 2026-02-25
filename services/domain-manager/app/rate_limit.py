@@ -2,6 +2,13 @@
 
 slowapi is a hard dependency. If the import fails the service must not start,
 because rate limiting is a security control that must never silently degrade.
+
+PRODUCTION REQUIREMENT: This service MUST be deployed behind a trusted reverse
+proxy (e.g., Nginx Ingress Controller) that sets the X-Forwarded-For header.
+Configure TRUSTED_PROXY_CIDRS with the pod/service CIDR of the ingress
+controller so that rate limiting keys on the real client IP instead of the
+proxy IP. Without this, all requests appear to come from the same IP and a
+single abusive client can exhaust the rate limit for all users.
 """
 
 import ipaddress
