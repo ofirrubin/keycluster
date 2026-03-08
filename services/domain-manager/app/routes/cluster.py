@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy import func, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import select
@@ -11,6 +11,7 @@ from sqlmodel import select
 from app.auth import KEYCLOAK_SERVER_URL, require_admin
 from app.database import get_session
 from app.models.domain import DomainMapping
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,9 @@ async def _count_domains(session: AsyncSession) -> int:
 
 
 @router.get("/health")
+@limiter.limit("120/minute")
 async def cluster_health(
+    request: Request,
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     """
@@ -82,17 +85,16 @@ async def cluster_health(
 
     return {
         "status": status,
-        "keycloak": keycloak_status,
-        "database": db_status,
-        # Realms are tracked in Keycloak, not locally — -1 is a documented sentinel
-        "realm_count": -1,
-        "domain_count": domain_count,
+        "keycloak": {"reachable": keycloak_status["reachable"]},
+        "database": {"connected": db_status["connected"]},
         "checked_at": datetime.now(timezone.utc).isoformat(),
     }
 
 
 @router.get("/metrics")
+@limiter.limit("60/minute")
 async def cluster_metrics(
+    request: Request,
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),
 ) -> dict:

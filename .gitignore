@@ -1,9 +1,4 @@
 .DS_Store
-.env
-*.pyc
 __pycache__/
-*.egg-info/
-.venv/
-dist/
-build/
-*.pyo
+.env
+k8s/secrets.yaml

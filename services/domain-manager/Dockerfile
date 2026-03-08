@@ -1,4 +1,6 @@
-FROM python:3.11-slim AS builder
+# TODO(production): Pin base image to a specific SHA256 digest for reproducible
+# builds, e.g. python:3.11-slim@sha256:<digest>
+FROM python:3.11-slim
 
 WORKDIR /app
 

@@ -62,13 +62,15 @@ spec:
         runAsUser: 1000
         runAsGroup: 1000
         fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: domain-manager
           image: domain-manager:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: false
+            readOnlyRootFilesystem: true
             capabilities:
               drop:
                 - ALL
@@ -78,16 +80,32 @@ spec:
               "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000",
             ]
           env:
+            # Preferred: scoped service account (client_credentials grant)
+            - name: KEYCLOAK_ADMIN_CLIENT_ID
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-secret
+                  key: KEYCLOAK_ADMIN_CLIENT_ID
+                  optional: true
+            - name: KEYCLOAK_ADMIN_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-secret
+                  key: KEYCLOAK_ADMIN_CLIENT_SECRET
+                  optional: true
+            # Legacy fallback: master realm super-admin (password grant)
             - name: KEYCLOAK_ADMIN
               valueFrom:
                 secretKeyRef:
                   name: keycloak-admin-secret
                   key: KEYCLOAK_ADMIN
+                  optional: true
             - name: KEYCLOAK_ADMIN_PASSWORD
               valueFrom:
                 secretKeyRef:
                   name: keycloak-admin-secret
                   key: KEYCLOAK_ADMIN_PASSWORD
+                  optional: true
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -97,6 +115,8 @@ spec:
               value: "http://keycloak:8080"
             - name: KEYCLOAK_REALM
               value: "master"
+            - name: KEYCLOAK_CLIENT_ID
+              value: "domain-manager"
             - name: ADMIN_ROLES
               value: "admin,keycluster-admin,realm-admin"
           ports:
@@ -113,6 +133,9 @@ spec:
               port: 8000
             initialDelaySeconds: 15
             periodSeconds: 20
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
           resources:
             requests:
               cpu: "100m"
@@ -120,3 +143,6 @@ spec:
             limits:
               cpu: "200m"
               memory: "256Mi"
+      volumes:
+        - name: tmp
+          emptyDir: {}

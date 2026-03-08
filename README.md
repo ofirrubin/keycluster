@@ -30,6 +30,10 @@ Key capabilities:
 - **Orphan cleanup** -- background job that removes Ingress resources and realms
   that are no longer mapped.
 
+#### Note: 
+I started the project with handwritten code. But due to time constraints and other projects, I let claude+gemini implement many of the code written, It changed and updated some of my code after requesting additional features. 
+Personally, I didn't yet conducted code review for it and not using it for production. The basic functionality I need for my PoC for another project works. 
+
 ## Architecture
 
 ```

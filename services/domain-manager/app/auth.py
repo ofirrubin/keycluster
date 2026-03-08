@@ -2,13 +2,15 @@
 Shared authentication and validation utilities for the domain-manager service.
 Extracted to avoid circular imports between main.py and route modules.
 """
+import asyncio
 import base64
 import json
 import logging
 import os
 import re
+import sys
 import time
-from collections import deque
+import urllib.parse
 from typing import List, Optional
 
 import httpx
@@ -24,10 +26,8 @@ KEYCLOAK_REALM = os.getenv("KEYCLOAK_REALM", "master")
 KEYCLOAK_CLIENT_ID = os.getenv("KEYCLOAK_CLIENT_ID", "")
 
 if not KEYCLOAK_CLIENT_ID:
-    logger.warning(
-        "KEYCLOAK_CLIENT_ID is not set; JWT audience validation is disabled. "
-        "Set KEYCLOAK_CLIENT_ID in production to enforce aud/azp checks."
-    )
+    logger.critical("KEYCLOAK_CLIENT_ID is required for JWT audience validation")
+    sys.exit(1)
 
 ADMIN_ROLES = [
     r.strip()
@@ -74,21 +74,48 @@ audit_logger = logging.getLogger("audit")
 audit_logger.setLevel(logging.INFO)
 
 
+def _sanitize_log_value(value: str) -> str:
+    """Strip control characters (< 0x20 except space) to prevent log injection."""
+    return "".join(c for c in value if c == " " or (c >= "\x20" and c != "\x7f"))
+
+
 def audit_log(action: str, claims: dict, realm: str = "", details: str = "") -> None:
-    user = claims.get("preferred_username", claims.get("sub", "unknown"))
+    user = _sanitize_log_value(
+        str(claims.get("preferred_username", claims.get("sub", "unknown")))
+    )
+    action = _sanitize_log_value(action)
     msg = f"action={action} user={user}"
     if realm:
-        msg += f" realm={realm}"
+        msg += f" realm={_sanitize_log_value(realm)}"
     if details:
-        msg += f" details={details}"
+        msg += f" details={_sanitize_log_value(details)}"
     audit_logger.info(msg)
 
 
 # ---------------------------------------------------------------------------
-# JWKS cache and JWT verification
+# JWKS cache, rate limiter, and JWT verification
 # ---------------------------------------------------------------------------
 _jwks_cache: Optional[dict] = None
 _jwks_uri_cache: Optional[str] = None
+_jwks_cache_time: float = 0.0
+_JWKS_CACHE_TTL: float = 300.0  # 5 minutes
+_jwks_lock: asyncio.Lock = asyncio.Lock()
+
+# Rate limiter: track JWKS fetch timestamps (max 10 per 60 seconds)
+_JWKS_MAX_FETCHES_PER_MIN: int = 10
+_jwks_fetch_timestamps: list[float] = []
+
+
+def _check_jwks_rate_limit() -> None:
+    """Enforce max 10 JWKS fetches per 60 seconds."""
+    now = time.time()
+    cutoff = now - 60.0
+    # Prune old entries
+    while _jwks_fetch_timestamps and _jwks_fetch_timestamps[0] < cutoff:
+        _jwks_fetch_timestamps.pop(0)
+    if len(_jwks_fetch_timestamps) >= _JWKS_MAX_FETCHES_PER_MIN:
+        raise ValueError("JWKS fetch rate limit exceeded")
+    _jwks_fetch_timestamps.append(now)
 
 # Rate limiting for JWKS refresh: max 10 fetches per 60 seconds
 _JWKS_RATE_LIMIT_MAX = 10
@@ -97,7 +124,8 @@ _jwks_fetch_timestamps: deque = deque()
 
 
 async def _fetch_keycloak_jwks_uri() -> str:
-    url = f"{KEYCLOAK_SERVER_URL}/realms/{KEYCLOAK_REALM}/.well-known/openid-configuration"
+    encoded_realm = urllib.parse.quote(KEYCLOAK_REALM, safe="")
+    url = f"{KEYCLOAK_SERVER_URL}/realms/{encoded_realm}/.well-known/openid-configuration"
     async with httpx.AsyncClient() as http:
         resp = await http.get(url, timeout=5.0)
         resp.raise_for_status()
@@ -105,6 +133,7 @@ async def _fetch_keycloak_jwks_uri() -> str:
 
 
 async def _fetch_jwks(jwks_uri: str) -> dict:
+    _check_jwks_rate_limit()
     async with httpx.AsyncClient() as http:
         resp = await http.get(jwks_uri, timeout=5.0)
         resp.raise_for_status()
@@ -112,28 +141,28 @@ async def _fetch_jwks(jwks_uri: str) -> dict:
 
 
 async def _get_jwks() -> dict:
-    global _jwks_cache, _jwks_uri_cache
-    if _jwks_cache is None:
+    global _jwks_cache, _jwks_uri_cache, _jwks_cache_time
+    # Fast path: return cached JWKS without acquiring the lock
+    if _jwks_cache is not None and (time.time() - _jwks_cache_time) <= _JWKS_CACHE_TTL:
+        return _jwks_cache
+    # Slow path: acquire lock so only one coroutine fetches at a time
+    async with _jwks_lock:
+        # Double-check after acquiring the lock (another coroutine may have refreshed)
+        if _jwks_cache is not None and (time.time() - _jwks_cache_time) <= _JWKS_CACHE_TTL:
+            return _jwks_cache
         _jwks_uri_cache = await _fetch_keycloak_jwks_uri()
         _jwks_cache = await _fetch_jwks(_jwks_uri_cache)
+        _jwks_cache_time = time.time()
     return _jwks_cache
 
 
 async def _refresh_jwks() -> dict:
-    global _jwks_cache, _jwks_uri_cache
-    now = time.time()
-    # Evict timestamps outside the rate-limit window
-    while _jwks_fetch_timestamps and _jwks_fetch_timestamps[0] < now - _JWKS_RATE_LIMIT_WINDOW:
-        _jwks_fetch_timestamps.popleft()
-    if len(_jwks_fetch_timestamps) >= _JWKS_RATE_LIMIT_MAX:
-        raise HTTPException(
-            status_code=429,
-            detail="Too many JWKS refresh requests — please retry later",
-        )
-    _jwks_fetch_timestamps.append(now)
-    if _jwks_uri_cache is None:
-        _jwks_uri_cache = await _fetch_keycloak_jwks_uri()
-    _jwks_cache = await _fetch_jwks(_jwks_uri_cache)
+    global _jwks_cache, _jwks_uri_cache, _jwks_cache_time
+    async with _jwks_lock:
+        if _jwks_uri_cache is None:
+            _jwks_uri_cache = await _fetch_keycloak_jwks_uri()
+        _jwks_cache = await _fetch_jwks(_jwks_uri_cache)
+        _jwks_cache_time = time.time()
     return _jwks_cache
 
 
@@ -229,18 +258,17 @@ async def verify_token(request: Request) -> dict:
     if payload.get("iss") != expected_issuer:
         raise HTTPException(status_code=401, detail="Invalid token issuer")
 
-    # Validate aud and azp claims when KEYCLOAK_CLIENT_ID is configured (opt-in)
-    if KEYCLOAK_CLIENT_ID:
-        aud = payload.get("aud")
-        if aud is None:
-            raise HTTPException(status_code=401, detail="Token missing aud claim")
-        aud_list: List[str] = [aud] if isinstance(aud, str) else list(aud)
-        if KEYCLOAK_CLIENT_ID not in aud_list:
-            raise HTTPException(status_code=401, detail="Token audience mismatch")
+    # Validate aud and azp claims (KEYCLOAK_CLIENT_ID is required at startup)
+    aud = payload.get("aud")
+    if aud is None:
+        raise HTTPException(status_code=401, detail="Token missing aud claim")
+    aud_list: List[str] = [aud] if isinstance(aud, str) else list(aud)
+    if KEYCLOAK_CLIENT_ID not in aud_list:
+        raise HTTPException(status_code=401, detail="Token audience mismatch")
 
-        azp = payload.get("azp")
-        if azp is not None and azp != KEYCLOAK_CLIENT_ID:
-            raise HTTPException(status_code=401, detail="Token authorized party mismatch")
+    azp = payload.get("azp")
+    if azp is not None and azp != KEYCLOAK_CLIENT_ID:
+        raise HTTPException(status_code=401, detail="Token authorized party mismatch")
 
     return payload
 
@@ -259,9 +287,71 @@ def require_admin(claims: dict = Depends(verify_token)) -> dict:
 # ---------------------------------------------------------------------------
 # Keycloak admin token
 # ---------------------------------------------------------------------------
-async def get_keycloak_admin_token() -> Optional[str]:
-    username = os.getenv("KEYCLOAK_ADMIN")
-    password = os.getenv("KEYCLOAK_ADMIN_PASSWORD")
+_ADMIN_CLIENT_ID: str = os.getenv("KEYCLOAK_ADMIN_CLIENT_ID", "")
+_ADMIN_CLIENT_SECRET: str = os.getenv("KEYCLOAK_ADMIN_CLIENT_SECRET", "")
+_USE_CLIENT_CREDENTIALS: bool = bool(_ADMIN_CLIENT_ID and _ADMIN_CLIENT_SECRET)
+
+# KEYCLOAK_AUTH_MODE controls which grant types are attempted:
+#   "auto"               - try client_credentials first, fall back to password (dev only)
+#   "client_credentials" - only client_credentials, never fall back to password
+# In production, password grant fallback is never allowed regardless of this setting.
+_KEYCLOAK_AUTH_MODE: str = os.getenv("KEYCLOAK_AUTH_MODE", "auto").lower()
+_IS_PRODUCTION: bool = os.getenv("ENVIRONMENT", "production").lower() != "dev"
+
+if _KEYCLOAK_AUTH_MODE not in ("auto", "client_credentials"):
+    logger.critical("KEYCLOAK_AUTH_MODE must be 'auto' or 'client_credentials', got '%s'", _KEYCLOAK_AUTH_MODE)
+    sys.exit(1)
+
+# In production with auth_mode=auto, password fallback is still blocked.
+# Only in non-production + auto mode is the fallback allowed.
+_ALLOW_PASSWORD_FALLBACK: bool = (
+    _KEYCLOAK_AUTH_MODE == "auto" and not _IS_PRODUCTION
+)
+
+if not _USE_CLIENT_CREDENTIALS:
+    if _IS_PRODUCTION:
+        logger.critical(
+            "KEYCLOAK_ADMIN_CLIENT_ID and KEYCLOAK_ADMIN_CLIENT_SECRET are required in production. "
+            "Password grant fallback is not allowed."
+        )
+        sys.exit(1)
+    else:
+        logger.warning(
+            "Using password grant for admin API. This is only acceptable in development. "
+            "Set KEYCLOAK_ADMIN_CLIENT_ID and KEYCLOAK_ADMIN_CLIENT_SECRET for production."
+        )
+
+
+async def _get_token_via_client_credentials() -> Optional[str]:
+    """Obtain an admin token using client_credentials grant (scoped service account)."""
+    async with httpx.AsyncClient() as http:
+        try:
+            resp = await http.post(
+                f"{KEYCLOAK_SERVER_URL}/realms/master/protocol/openid-connect/token",
+                data={
+                    "client_id": _ADMIN_CLIENT_ID,
+                    "client_secret": _ADMIN_CLIENT_SECRET,
+                    "grant_type": "client_credentials",
+                },
+                timeout=5.0,
+            )
+            resp.raise_for_status()
+            return resp.json()["access_token"]
+        except Exception as e:
+            logger.error(
+                "Failed to authenticate with Keycloak (client_credentials): exc_type=%s",
+                type(e).__name__,
+            )
+            return None
+
+
+async def _get_token_via_password() -> Optional[str]:
+    """Obtain an admin token using password grant (legacy, master realm super-admin).
+
+    Only allowed in development environments with KEYCLOAK_AUTH_MODE=auto.
+    """
+    username: str = os.getenv("KEYCLOAK_ADMIN", "")
+    password: str = os.getenv("KEYCLOAK_ADMIN_PASSWORD", "")
     if not username or not password:
         logger.error("KEYCLOAK_ADMIN credentials not set")
         return None
@@ -282,8 +372,84 @@ async def get_keycloak_admin_token() -> Optional[str]:
             return resp.json()["access_token"]
         except Exception as e:
             logger.error(
-                "Failed to authenticate with Keycloak: exc_type=%s status=%s",
+                "Failed to authenticate with Keycloak (password): exc_type=%s",
                 type(e).__name__,
-                getattr(getattr(e, "response", None), "status_code", "N/A"),
             )
             return None
+
+
+async def get_keycloak_admin_token() -> Optional[str]:
+    """Obtain a Keycloak admin API token.
+
+    Prefers client_credentials grant when KEYCLOAK_ADMIN_CLIENT_ID and
+    KEYCLOAK_ADMIN_CLIENT_SECRET are set (scoped service account, lower blast
+    radius). Falls back to password grant ONLY in development environments
+    with KEYCLOAK_AUTH_MODE=auto.
+    """
+    if _USE_CLIENT_CREDENTIALS:
+        token = await _get_token_via_client_credentials()
+        if token is not None:
+            return token
+        # client_credentials failed; only fall back if explicitly allowed
+        if not _ALLOW_PASSWORD_FALLBACK:
+            logger.error("client_credentials grant failed and password fallback is disabled")
+            return None
+        logger.warning("client_credentials grant failed, falling back to password grant (dev only)")
+
+    if not _ALLOW_PASSWORD_FALLBACK:
+        logger.error("Password grant fallback is disabled (production or KEYCLOAK_AUTH_MODE=client_credentials)")
+        return None
+
+    return await _get_token_via_password()
+
+
+# ---------------------------------------------------------------------------
+# Token introspection (defense-in-depth for destructive operations)
+# ---------------------------------------------------------------------------
+async def introspect_token(token: str) -> bool:
+    """Introspect a token against Keycloak to verify it has not been revoked.
+
+    Used as defense-in-depth on destructive (DELETE) endpoints. Within the JWKS
+    cache TTL window, a revoked token would still pass local JWT validation.
+    Introspection catches this by checking the token's active status server-side.
+
+    Returns True if the token is active, False otherwise.
+    """
+    # Introspection requires client credentials to authenticate the request
+    if not _ADMIN_CLIENT_ID or not _ADMIN_CLIENT_SECRET:
+        if _IS_PRODUCTION:
+            logger.critical("Token introspection credentials required in production")
+            raise HTTPException(status_code=500, detail="Service misconfigured")
+        # Cannot introspect without client credentials; log and allow
+        # (the JWT was already validated locally)
+        logger.warning(
+            "Token introspection skipped: KEYCLOAK_ADMIN_CLIENT_ID/SECRET not configured"
+        )
+        return True
+
+    encoded_realm = urllib.parse.quote(KEYCLOAK_REALM, safe="")
+    introspect_url = (
+        f"{KEYCLOAK_SERVER_URL}/realms/{encoded_realm}/protocol/openid-connect/token/introspect"
+    )
+
+    try:
+        async with httpx.AsyncClient() as http:
+            resp = await http.post(
+                introspect_url,
+                data={
+                    "token": token,
+                    "client_id": _ADMIN_CLIENT_ID,
+                    "client_secret": _ADMIN_CLIENT_SECRET,
+                },
+                timeout=5.0,
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            return result.get("active", False)
+    except Exception as e:
+        logger.error(
+            "Token introspection failed: exc_type=%s", type(e).__name__
+        )
+        # Fail open: if introspection is unavailable, rely on local JWT validation.
+        # This is a defense-in-depth measure, not the primary auth gate.
+        return True

@@ -1,20 +1,35 @@
 import logging
+import os
 import re
-from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Depends
+import urllib.parse
+import uuid
+from typing import List, Optional, Set
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from pydantic import BaseModel, field_validator
 import httpx
 from urllib.parse import quote
 
 from app.auth import (
     require_admin,
+    introspect_token,
     audit_log,
     validate_realm_name,
     get_keycloak_admin_token,
     KEYCLOAK_SERVER_URL,
 )
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Role allowlist
+# ---------------------------------------------------------------------------
+_raw_allowed_roles: str = os.getenv("ALLOWED_GRANTABLE_ROLES", "")
+ALLOWED_GRANTABLE_ROLES: Optional[Set[str]] = (
+    {r.strip() for r in _raw_allowed_roles.split(",") if r.strip()}
+    if _raw_allowed_roles
+    else None
+)
 
 router = APIRouter(
     prefix="/v1/realms/{realm}/service-accounts",
@@ -51,9 +66,11 @@ class ServiceAccountCreate(BaseModel):
     @field_validator("roles")
     @classmethod
     def validate_roles(cls, v: List[str]) -> List[str]:
+        if len(v) > 100:
+            raise ValueError("A service account must not have more than 100 roles")
         for role in v:
             if not re.match(r"^[a-zA-Z0-9_-]{1,100}$", role):
-                raise ValueError(f"Invalid role name: {role}")
+                raise ValueError("Invalid role name format")
         return v
 
 
@@ -91,20 +108,28 @@ async def _resolve_client_internal_id(
     headers: dict,
 ) -> str:
     """Resolve a Keycloak clientId to its internal UUID."""
+    encoded_realm = urllib.parse.quote(realm, safe="")
     resp = await http.get(
-        f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients",
+        f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients",
         params={"clientId": client_id},
         headers=headers,
         timeout=10.0,
     )
-    resp.raise_for_status()
+    try:
+        resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "Failed to resolve client: exc_type=%s status=%s",
+            type(exc).__name__, exc.response.status_code,
+        )
+        raise HTTPException(status_code=502, detail="Keycloak operation failed")
     matches = resp.json()
 
     for m in matches:
         if m["clientId"] == client_id:
             return m["id"]
 
-    raise HTTPException(status_code=404, detail=f"Client '{client_id}' not found")
+    raise HTTPException(status_code=404, detail="Client not found")
 
 
 async def _assign_service_account_roles(
@@ -115,61 +140,107 @@ async def _assign_service_account_roles(
     headers: dict,
 ) -> None:
     """Assign realm roles to the service account user of a client."""
+    encoded_realm = urllib.parse.quote(realm, safe="")
     sa_resp = await http.get(
-        f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients/{quote(internal_client_id, safe='')}/service-account-user",
+        f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients/{internal_client_id}/service-account-user",
         headers=headers,
         timeout=10.0,
     )
-    sa_resp.raise_for_status()
+    try:
+        sa_resp.raise_for_status()
+    except httpx.HTTPStatusError as exc:
+        logger.error(
+            "Failed to get service account user: exc_type=%s status=%s",
+            type(exc).__name__, exc.response.status_code,
+        )
+        raise HTTPException(status_code=502, detail="Keycloak operation failed")
     sa_user_id = sa_resp.json()["id"]
 
     role_payloads = []
     for rn in role_names:
+        encoded_role = urllib.parse.quote(rn, safe="")
         role_resp = await http.get(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/roles/{quote(rn, safe='')}",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/roles/{encoded_role}",
             headers=headers,
             timeout=10.0,
         )
         if role_resp.status_code == 404:
-            logger.warning("Role '%s' not found in realm '%s', skipping", rn, realm)
+            logger.warning("Role not found in realm, skipping: exc_type=NotFound")
             continue
-        role_resp.raise_for_status()
+        try:
+            role_resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to fetch role: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
         role_payloads.append(role_resp.json())
 
     if role_payloads:
         assign_resp = await http.post(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/users/{quote(sa_user_id, safe='')}/role-mappings/realm",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/users/{sa_user_id}/role-mappings/realm",
             json=role_payloads,
             headers=headers,
             timeout=10.0,
         )
-        assign_resp.raise_for_status()
+        try:
+            assign_resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to assign roles: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
 
 
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+_MAX_PAGE_SIZE: int = 100
+
+
 @router.get("", response_model=List[ServiceAccountResponse])
+@limiter.limit("60/minute")
 async def list_service_accounts(
+    request: Request,
     realm: str,
+    first: int = Query(0, ge=0, description="Pagination offset"),
+    max_results: int = Query(
+        _MAX_PAGE_SIZE, ge=1, le=_MAX_PAGE_SIZE, alias="max",
+        description="Maximum number of results to return",
+    ),
     claims: dict = Depends(require_admin),
 ):
-    """List all clients with service accounts enabled in the realm. Admin only."""
+    """List clients with service accounts enabled in the realm. Admin only.
+
+    Supports pagination via ``first`` (offset) and ``max`` (page size, capped
+    at 100) query parameters.
+    """
     validate_realm_name(realm)
 
     headers = await _admin_headers()
+    encoded_realm = urllib.parse.quote(realm, safe="")
 
     async with httpx.AsyncClient() as http:
         resp = await http.get(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients",
+            params={"first": first, "max": max_results},
             headers=headers,
             timeout=10.0,
         )
         if resp.status_code == 404:
             raise HTTPException(
-                status_code=404, detail=f"Realm '{realm}' not found"
+                status_code=404, detail="Realm not found"
             )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to list clients: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
         clients = resp.json()
 
     result: List[ServiceAccountResponse] = []
@@ -189,7 +260,9 @@ async def list_service_accounts(
 
 
 @router.post("", response_model=ServiceAccountSecret, status_code=201)
+@limiter.limit("15/minute")
 async def create_service_account(
+    request: Request,
     realm: str,
     body: ServiceAccountCreate,
     claims: dict = Depends(require_admin),
@@ -197,7 +270,19 @@ async def create_service_account(
     """Create a new service account client in the realm. Admin only."""
     validate_realm_name(realm)
 
+    # Enforce role allowlist when configured
+    if ALLOWED_GRANTABLE_ROLES is not None and body.roles:
+        disallowed: List[str] = [
+            r for r in body.roles if r not in ALLOWED_GRANTABLE_ROLES
+        ]
+        if disallowed:
+            raise HTTPException(
+                status_code=403,
+                detail="Some requested roles are not permitted",
+            )
+
     headers = await _admin_headers()
+    encoded_realm = urllib.parse.quote(realm, safe="")
 
     client_payload = {
         "clientId": body.client_id,
@@ -214,7 +299,7 @@ async def create_service_account(
     async with httpx.AsyncClient() as http:
         # Create client
         resp = await http.post(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients",
             json=client_payload,
             headers=headers,
             timeout=10.0,
@@ -222,17 +307,34 @@ async def create_service_account(
         if resp.status_code == 409:
             raise HTTPException(
                 status_code=409,
-                detail=f"Client '{body.client_id}' already exists",
+                detail="Client already exists",
             )
         if resp.status_code == 404:
             raise HTTPException(
-                status_code=404, detail=f"Realm '{realm}' not found"
+                status_code=404, detail="Realm not found"
             )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to create client: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
 
-        # Get internal ID from Location header
+        # Get internal ID from Location header and validate UUID format
+        internal_id: Optional[str] = None
         location = resp.headers.get("Location", "")
-        internal_id = location.rsplit("/", 1)[-1] if location else None
+        if location:
+            candidate = location.rsplit("/", 1)[-1]
+            try:
+                uuid.UUID(candidate)
+                internal_id = candidate
+            except ValueError:
+                logger.warning(
+                    "Location header contained invalid UUID: length=%d",
+                    len(candidate),
+                )
 
         if not internal_id:
             internal_id = await _resolve_client_internal_id(
@@ -241,11 +343,18 @@ async def create_service_account(
 
         # Fetch the generated client secret
         secret_resp = await http.get(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients/{quote(internal_id, safe='')}/client-secret",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients/{internal_id}/client-secret",
             headers=headers,
             timeout=10.0,
         )
-        secret_resp.raise_for_status()
+        try:
+            secret_resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to fetch client secret: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
         secret = secret_resp.json().get("value", "")
 
         # Assign roles if requested
@@ -263,7 +372,9 @@ async def create_service_account(
 
 
 @router.delete("/{client_id}")
+@limiter.limit("15/minute")
 async def delete_service_account(
+    request: Request,
     realm: str,
     client_id: str,
     claims: dict = Depends(require_admin),
@@ -271,10 +382,19 @@ async def delete_service_account(
     """Delete a service account client from the realm. Admin only."""
     validate_realm_name(realm)
 
+    # Defense-in-depth: introspect token for destructive operations to catch
+    # revoked tokens within the JWKS cache TTL window.
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token_active = await introspect_token(auth_header[7:])
+        if not token_active:
+            raise HTTPException(status_code=401, detail="Token has been revoked")
+
     if not _CLIENT_ID_PATTERN.match(client_id):
         raise HTTPException(status_code=400, detail="Invalid client_id format")
 
     headers = await _admin_headers()
+    encoded_realm = urllib.parse.quote(realm, safe="")
 
     async with httpx.AsyncClient() as http:
         internal_id = await _resolve_client_internal_id(
@@ -282,13 +402,20 @@ async def delete_service_account(
         )
 
         resp = await http.delete(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients/{quote(internal_id, safe='')}",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients/{internal_id}",
             headers=headers,
             timeout=10.0,
         )
         if resp.status_code == 404:
             raise HTTPException(status_code=404, detail="Client not found")
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to delete client: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
 
     audit_log(
         "service_account_delete", claims, realm=realm,
@@ -298,7 +425,9 @@ async def delete_service_account(
 
 
 @router.post("/{client_id}/rotate", response_model=ServiceAccountSecret)
+@limiter.limit("10/minute")
 async def rotate_client_secret(
+    request: Request,
     realm: str,
     client_id: str,
     claims: dict = Depends(require_admin),
@@ -310,6 +439,7 @@ async def rotate_client_secret(
         raise HTTPException(status_code=400, detail="Invalid client_id format")
 
     headers = await _admin_headers()
+    encoded_realm = urllib.parse.quote(realm, safe="")
 
     async with httpx.AsyncClient() as http:
         internal_id = await _resolve_client_internal_id(
@@ -318,11 +448,18 @@ async def rotate_client_secret(
 
         # POST to regenerate the secret
         resp = await http.post(
-            f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/clients/{quote(internal_id, safe='')}/client-secret",
+            f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/clients/{internal_id}/client-secret",
             headers=headers,
             timeout=10.0,
         )
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            logger.error(
+                "Failed to rotate client secret: exc_type=%s status=%s",
+                type(exc).__name__, exc.response.status_code,
+            )
+            raise HTTPException(status_code=502, detail="Keycloak operation failed")
         new_secret = resp.json().get("value", "")
 
     audit_log(

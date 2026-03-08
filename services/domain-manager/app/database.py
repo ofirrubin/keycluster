@@ -13,6 +13,8 @@ engine = create_async_engine(
     DATABASE_URL,
     echo=os.environ.get("SQL_ECHO", "").lower() in ("1", "true"),
     future=True,
+    pool_size=int(os.environ.get("DB_POOL_SIZE", "10")),
+    max_overflow=int(os.environ.get("DB_MAX_OVERFLOW", "5")),
 )
 
 async def init_db() -> None:

@@ -1,9 +1,10 @@
 import logging
 import re
+import urllib.parse
 import httpx
 from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, field_validator
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,11 +14,14 @@ from app.database import get_session
 from app.models.role_template import RoleTemplate
 from app.auth import (
     require_admin,
+    verify_token,
+    introspect_token,
     audit_log,
     validate_realm_name,
     get_keycloak_admin_token,
     KEYCLOAK_SERVER_URL,
 )
+from app.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +33,9 @@ _TEMPLATE_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]{0,98}[a-zA-Z0-9]
 # ---------------------------------------------------------------------------
 # Schemas
 # ---------------------------------------------------------------------------
+_PERMISSION_NAME_PATTERN = re.compile(r"^[a-zA-Z0-9_\-:.]{1,100}$")
+
+
 class RoleDefinition(BaseModel):
     name: str
     description: str = ""
@@ -49,6 +56,28 @@ class RoleDefinition(BaseModel):
     def validate_description(cls, v: str) -> str:
         if len(v) > 500:
             raise ValueError("Role description must be under 500 characters")
+        return v
+
+    @field_validator("composite_roles")
+    @classmethod
+    def validate_composite_roles(cls, v: List[str]) -> List[str]:
+        if len(v) > 50:
+            raise ValueError("A role must not reference more than 50 composite roles")
+        for name in v:
+            if not re.match(r"^[a-zA-Z0-9_-]{1,100}$", name):
+                raise ValueError("Composite role names must be 1-100 alphanumeric characters, hyphens, or underscores")
+        return v
+
+    @field_validator("permissions")
+    @classmethod
+    def validate_permissions(cls, v: List[str]) -> List[str]:
+        if len(v) > 200:
+            raise ValueError("A role must not have more than 200 permissions")
+        for perm in v:
+            if not _PERMISSION_NAME_PATTERN.match(perm):
+                raise ValueError(
+                    "Permission names must be 1-100 characters: alphanumeric, hyphens, underscores, colons, or dots"
+                )
         return v
 
 
@@ -78,6 +107,8 @@ class RoleTemplateCreate(BaseModel):
     def validate_roles_nonempty(cls, v: List[RoleDefinition]) -> List[RoleDefinition]:
         if not v:
             raise ValueError("At least one role is required")
+        if len(v) > 100:
+            raise ValueError("A role template must not contain more than 100 roles")
         names = [r.name for r in v]
         if len(names) != len(set(names)):
             raise ValueError("Duplicate role names are not allowed")
@@ -113,6 +144,8 @@ class RoleTemplateUpdate(BaseModel):
         if v is not None:
             if not v:
                 raise ValueError("At least one role is required")
+            if len(v) > 100:
+                raise ValueError("A role template must not contain more than 100 roles")
             names = [r.name for r in v]
             if len(names) != len(set(names)):
                 raise ValueError("Duplicate role names are not allowed")
@@ -149,10 +182,14 @@ def _template_to_response(template: RoleTemplate) -> RoleTemplateResponse:
 # Routes
 # ---------------------------------------------------------------------------
 @router.get("", response_model=List[RoleTemplateResponse])
+@limiter.limit("60/minute")
 async def list_templates(
+    request: Request,
     session: AsyncSession = Depends(get_session),
+    claims: dict = Depends(verify_token),
 ):
-    """List all role templates. Public endpoint."""
+    """List all role templates. Requires authentication to prevent leaking
+    security role structure to unauthenticated callers."""
     statement = select(RoleTemplate).order_by(RoleTemplate.name)
     results = await session.execute(statement)
     templates = results.scalars().all()
@@ -160,7 +197,9 @@ async def list_templates(
 
 
 @router.post("", response_model=RoleTemplateResponse, status_code=201)
+@limiter.limit("15/minute")
 async def create_template(
+    request: Request,
     body: RoleTemplateCreate,
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),
@@ -171,7 +210,7 @@ async def create_template(
     )
     if existing.scalar_one_or_none() is not None:
         raise HTTPException(
-            status_code=409, detail=f"Template '{body.name}' already exists"
+            status_code=409, detail="A template with this name already exists"
         )
 
     template = RoleTemplate(
@@ -189,7 +228,9 @@ async def create_template(
 
 
 @router.put("/{template_id}", response_model=RoleTemplateResponse)
+@limiter.limit("15/minute")
 async def update_template(
+    request: Request,
     template_id: int,
     body: RoleTemplateUpdate,
     session: AsyncSession = Depends(get_session),
@@ -214,7 +255,7 @@ async def update_template(
             if dup.scalar_one_or_none() is not None:
                 raise HTTPException(
                     status_code=409,
-                    detail=f"Template '{body.name}' already exists",
+                    detail="A template with this name already exists",
                 )
         template.name = body.name
 
@@ -233,12 +274,22 @@ async def update_template(
 
 
 @router.delete("/{template_id}")
+@limiter.limit("15/minute")
 async def delete_template(
+    request: Request,
     template_id: int,
     session: AsyncSession = Depends(get_session),
     claims: dict = Depends(require_admin),
 ):
     """Delete a role template. Cannot delete default templates. Admin only."""
+    # Defense-in-depth: introspect token for destructive operations to catch
+    # revoked tokens within the JWKS cache TTL window.
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.startswith("Bearer "):
+        token_active = await introspect_token(auth_header[7:])
+        if not token_active:
+            raise HTTPException(status_code=401, detail="Token has been revoked")
+
     result = await session.execute(
         select(RoleTemplate).where(RoleTemplate.id == template_id)
     )
@@ -260,7 +311,9 @@ async def delete_template(
 
 
 @router.post("/{template_id}/apply/{realm}")
+@limiter.limit("10/minute")
 async def apply_template_to_realm(
+    request: Request,
     template_id: int,
     realm: str,
     session: AsyncSession = Depends(get_session),
@@ -291,6 +344,8 @@ async def apply_template_to_realm(
     skipped: List[str] = []
     errors: List[str] = []
 
+    encoded_realm = urllib.parse.quote(realm, safe="")
+
     async with httpx.AsyncClient() as http:
         # Create base roles first
         for role_def in template.roles:
@@ -304,7 +359,7 @@ async def apply_template_to_realm(
 
             try:
                 resp = await http.post(
-                    f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/roles",
+                    f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/roles",
                     json=payload,
                     headers=headers,
                     timeout=10.0,
@@ -329,12 +384,14 @@ async def apply_template_to_realm(
                 continue
 
             role_name = role_def["name"]
+            encoded_role = urllib.parse.quote(role_name, safe="")
             composite_payloads = []
 
             for comp_name in composite_roles:
+                encoded_comp = urllib.parse.quote(comp_name, safe="")
                 try:
                     resp = await http.get(
-                        f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/roles/{quote(comp_name, safe='')}",
+                        f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/roles/{encoded_comp}",
                         headers=headers,
                         timeout=10.0,
                     )
@@ -342,14 +399,14 @@ async def apply_template_to_realm(
                     composite_payloads.append(resp.json())
                 except Exception as e:
                     logger.warning(
-                        "Could not resolve composite role '%s' for '%s' in realm '%s': %s",
-                        comp_name, role_name, realm, e,
+                        "Could not resolve composite role '%s' for '%s' in realm '%s': exc_type=%s",
+                        comp_name, role_name, realm, type(e).__name__,
                     )
 
             if composite_payloads:
                 try:
                     resp = await http.post(
-                        f"{KEYCLOAK_SERVER_URL}/admin/realms/{quote(realm, safe='')}/roles/{quote(role_name, safe='')}/composites",
+                        f"{KEYCLOAK_SERVER_URL}/admin/realms/{encoded_realm}/roles/{encoded_role}/composites",
                         json=composite_payloads,
                         headers=headers,
                         timeout=10.0,
@@ -357,8 +414,8 @@ async def apply_template_to_realm(
                     resp.raise_for_status()
                 except Exception as e:
                     logger.error(
-                        "Failed to set composites for role '%s' in realm '%s': %s",
-                        role_name, realm, e,
+                        "Failed to set composites for role '%s' in realm '%s': exc_type=%s",
+                        role_name, realm, type(e).__name__,
                     )
 
     audit_log(
