@@ -8,6 +8,7 @@ from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, field_validator
 from sqlmodel import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from urllib.parse import quote
 
 from app.database import get_session
 from app.models.role_template import RoleTemplate

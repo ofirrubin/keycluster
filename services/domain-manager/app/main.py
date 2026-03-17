@@ -185,8 +185,8 @@ class ThemeConfig(BaseModel):
     @field_validator("themeMode")
     @classmethod
     def validate_theme_mode(cls, v: str) -> str:
-        if v not in ("light", "dark"):
-            raise ValueError("themeMode must be 'light' or 'dark'")
+        if v not in ("light", "dark", "system"):
+            raise ValueError("themeMode must be 'light', 'dark', or 'system'")
         return v
 
     @field_validator("borderRadius")
@@ -595,7 +595,7 @@ async def patch_realm_security_headers(
 # ---------------------------------------------------------------------------
 # Kubernetes helpers
 # ---------------------------------------------------------------------------
-async def get_kubernetes_client():
+async def get_kubernetes_client() -> client.NetworkingV1Api:
     try:
         config.load_incluster_config()
     except config.ConfigException:
@@ -815,7 +815,7 @@ async def sync_domain(
     }
 
 
-async def delete_domain_ingress(realm: str, api) -> dict:
+async def delete_domain_ingress(realm: str, api: client.NetworkingV1Api) -> dict:
     ingress_name = f"keycloak-realm-{realm}"
     try:
         await api.delete_namespaced_ingress(ingress_name, NAMESPACE)
@@ -1170,7 +1170,7 @@ async def cleanup_orphans(
     return {"status": "cleanup_triggered", "valid_realms_count": len(valid_realms)}
 
 
-async def run_cleanup(valid_realms: List[str]) -> None:
+async def run_cleanup(valid_realms: list[str]) -> None:
     logger.info("Running orphan cleanup. Valid realms: %s", valid_realms)
     api = await get_kubernetes_client()
 

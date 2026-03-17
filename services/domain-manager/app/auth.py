@@ -117,6 +117,11 @@ def _check_jwks_rate_limit() -> None:
         raise ValueError("JWKS fetch rate limit exceeded")
     _jwks_fetch_timestamps.append(now)
 
+# Rate limiting for JWKS refresh: max 10 fetches per 60 seconds
+_JWKS_RATE_LIMIT_MAX = 10
+_JWKS_RATE_LIMIT_WINDOW = 60
+_jwks_fetch_timestamps: deque = deque()
+
 
 async def _fetch_keycloak_jwks_uri() -> str:
     encoded_realm = urllib.parse.quote(KEYCLOAK_REALM, safe="")

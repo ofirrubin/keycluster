@@ -7,6 +7,7 @@ from typing import List, Optional, Set
 from fastapi import APIRouter, HTTPException, Depends, Query, Request
 from pydantic import BaseModel, field_validator
 import httpx
+from urllib.parse import quote
 
 from app.auth import (
     require_admin,
