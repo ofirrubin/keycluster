@@ -207,6 +207,68 @@ All mutating endpoints require a valid Bearer token with an admin role.
 Interactive API documentation is available at `/docs` (Swagger UI) and
 `/redoc` (ReDoc) when the Domain Manager is running.
 
+## Realm Bootstrap (dedicated-Keycloak tenant seed)
+
+When Keycluster provisions a dedicated Keycloak for a fresh tenant, the
+`k8s/realm-bootstrap/` manifest seeds **everything needed for a working admin
+login on the first try** -- no manual Keycloak patching. It is idempotent and
+safe to re-run, talks only to the Keycloak Admin REST API, and never logs
+secrets.
+
+### What it seeds
+
+| Seed | Replaces manual step |
+|------|----------------------|
+| The realm (reused if it already exists) | manual realm create |
+| `<server>` confidential client (standardFlow + serviceAccounts) | manual client create |
+| `<customer>` + `<admin>` public clients (PKCE S256) | manual client create |
+| `redirectUris` + `webOrigins` per storefront/api/admin origin (+ `/*`) | manually editing redirect URIs |
+| `post.logout.redirect.uris` (`##`-delimited, all origins + `/*`) on every client | manually editing post-logout URIs |
+| `oidc-usermodel-realm-role-mapper` -> `realm_access.roles` in **ID token** (and access/userinfo) on every client | manual ID-token role mapper on the server client |
+| `admin` + `realm-admin` realm roles | manual realm-role create |
+| The admin user with password set | manual user + password |
+| Realm roles **assigned** to the admin user | manual role assignment |
+| `<realm>-auth` K8s Secret, key `SERVER_CLIENT_SECRET`, in the tenant namespace | manual secret copy |
+
+The ids/roles/origins mirror `templates/ecommerce/dam-template.json`
+`crossService.auth` but are fully parameterized -- nothing is hardcoded.
+
+### Parameters
+
+Non-secret params live in the `realm-bootstrap-params` ConfigMap inside
+`realm-bootstrap-job.yaml`:
+
+`KC_URL`, `REALM`, `APP_ADMIN_USER`, `APP_ADMIN_EMAIL`, `APP_ADMIN_FIRST_NAME`,
+`APP_ADMIN_LAST_NAME`, `SERVER_CLIENT_ID`, `CUSTOMER_CLIENT_ID`,
+`ADMIN_CLIENT_ID`, `STOREFRONT_ORIGIN`, `API_ORIGIN`, `ADMIN_ORIGIN`,
+`TARGET_NAMESPACE`, `REALM_ROLES` (default `admin realm-admin`).
+
+Secrets: Keycloak master-admin creds come from the existing
+`keycloak-admin-secret` (`KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD`); the
+seeded app-admin password is the `APP_ADMIN_PASSWORD` key of the
+`realm-bootstrap-creds` Secret.
+
+### How to run
+
+1. Edit the `realm-bootstrap-params` ConfigMap and `realm-bootstrap-creds`
+   Secret in `k8s/realm-bootstrap/realm-bootstrap-job.yaml` for your tenant.
+2. Render a single apply-able manifest (packages the script into a ConfigMap
+   and wires the target namespace into the RBAC objects):
+
+   ```bash
+   cd k8s/realm-bootstrap
+   TARGET_NAMESPACE=<tenant-namespace> ./render-job.sh > /tmp/realm-bootstrap.yaml
+   ```
+
+3. Apply it to the tenant cluster during the fresh deploy:
+
+   ```bash
+   emerge apply <clusterId> /tmp/realm-bootstrap.yaml
+   ```
+
+The Job waits for Keycloak readiness, converges all state, writes the
+`<realm>-auth` Secret, and exits. Re-running is a no-op beyond reconciliation.
+
 ## Themes
 
 Three dynamic theme variants are included:
