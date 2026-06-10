@@ -1,0 +1,155 @@
+# realm-bootstrap-job.yaml
+#
+# Idempotent full seed of a dedicated Keycloak realm for a fresh tenant deploy.
+# Apply with:  emerge apply <clusterId> k8s/realm-bootstrap/realm-bootstrap-job.yaml
+#
+# Before applying, set the parameters below. The two ways to parameterize:
+#   1. Edit the `realm-bootstrap-params` ConfigMap (non-secret) and the
+#      `realm-bootstrap-creds` Secret (admin + app-admin passwords) inline here.
+#   2. Or generate a ready-to-apply manifest with render-job.sh (see README).
+#
+# The script (realm-bootstrap.sh) is mounted from the `realm-bootstrap-script`
+# ConfigMap so the image stays a plain tooling image (curl + jq + kubectl).
+#
+# Idempotent + safe to re-run. Secrets are never logged.
+# -----------------------------------------------------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: realm-bootstrap
+  namespace: keycloak
+automountServiceAccountToken: true
+---
+# RBAC: only the permission needed to write/patch the <realm>-auth Secret in the
+# target namespace. Replace TARGET_NAMESPACE in metadata.namespace below to match
+# the TARGET_NAMESPACE param.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: realm-bootstrap-secret-writer
+  namespace: TARGET_NAMESPACE
+rules:
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "create", "patch", "update"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: realm-bootstrap-secret-writer
+  namespace: TARGET_NAMESPACE
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: realm-bootstrap-secret-writer
+subjects:
+  - kind: ServiceAccount
+    name: realm-bootstrap
+    namespace: keycloak
+---
+# Non-secret parameters. Edit these for your deploy.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: realm-bootstrap-params
+  namespace: keycloak
+data:
+  KC_URL: "http://keycloak.keycloak.svc.cluster.local:8080"
+  REALM: "ecommerce"
+  APP_ADMIN_USER: "admin"
+  APP_ADMIN_EMAIL: "admin@example.com"
+  APP_ADMIN_FIRST_NAME: "Store"
+  APP_ADMIN_LAST_NAME: "Admin"
+  SERVER_CLIENT_ID: "ecommerce-server"
+  CUSTOMER_CLIENT_ID: "ecommerce-customer"
+  ADMIN_CLIENT_ID: "ecommerce-admin"
+  STOREFRONT_ORIGIN: "https://store.example.com"
+  API_ORIGIN: "https://api.example.com"
+  ADMIN_ORIGIN: "https://admin.example.com"
+  TARGET_NAMESPACE: "TARGET_NAMESPACE"
+  REALM_ROLES: "admin realm-admin"
+---
+# Passwords. The Keycloak master-admin creds reference the existing
+# keycloak-admin-secret keys (KEYCLOAK_ADMIN / KEYCLOAK_ADMIN_PASSWORD).
+# Set the app-admin password here (or render it from your secret manager).
+apiVersion: v1
+kind: Secret
+metadata:
+  name: realm-bootstrap-creds
+  namespace: keycloak
+type: Opaque
+stringData:
+  APP_ADMIN_PASSWORD: "REPLACE_ME_app_admin_password"
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: realm-bootstrap
+  namespace: keycloak
+spec:
+  backoffLimit: 3
+  ttlSecondsAfterFinished: 3600
+  template:
+    metadata:
+      labels:
+        app: realm-bootstrap
+    spec:
+      serviceAccountName: realm-bootstrap
+      restartPolicy: Never
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        runAsGroup: 1000
+        fsGroup: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: bootstrap
+          # Tooling image with bash, curl, jq and kubectl. Pin a digest in prod.
+          image: bitnami/kubectl:1.30
+          imagePullPolicy: Always
+          command: ["/bin/bash", "/scripts/realm-bootstrap.sh"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          envFrom:
+            - configMapRef:
+                name: realm-bootstrap-params
+          env:
+            - name: KC_ADMIN_USER
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-secret
+                  key: KEYCLOAK_ADMIN
+            - name: KC_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: keycloak-admin-secret
+                  key: KEYCLOAK_ADMIN_PASSWORD
+            - name: APP_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: realm-bootstrap-creds
+                  key: APP_ADMIN_PASSWORD
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
+            limits:
+              cpu: "500m"
+              memory: "256Mi"
+      volumes:
+        - name: script
+          configMap:
+            name: realm-bootstrap-script
+            defaultMode: 0555
+        - name: tmp
+          emptyDir: {}
