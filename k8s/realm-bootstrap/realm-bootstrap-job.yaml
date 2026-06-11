@@ -68,6 +68,11 @@ data:
   ADMIN_ORIGIN: "https://admin.example.com"
   TARGET_NAMESPACE: "TARGET_NAMESPACE"
   REALM_ROLES: "admin realm-admin"
+  # realm-management client roles granted to the server client's service account
+  # so the app can query/manage realm users via the admin API (Users page).
+  # Default is least-privilege for the eCommerce server (reads + writes users).
+  # For a read-only app, drop manage-users.
+  SERVER_SA_REALM_MGMT_ROLES: "view-users query-users query-groups view-realm manage-users"
 ---
 # Passwords. The Keycloak master-admin creds reference the existing
 # keycloak-admin-secret keys (KEYCLOAK_ADMIN / KEYCLOAK_ADMIN_PASSWORD).

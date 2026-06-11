@@ -39,6 +39,14 @@
 # Optional:
 #   REALM_ROLES            space/comma list of realm roles to ensure+assign
 #                          (default: "admin realm-admin")
+#   SERVER_SA_REALM_MGMT_ROLES
+#                          realm-management CLIENT roles granted to the server
+#                          client's service account so the app can query/manage
+#                          realm users via the admin API. Default is least-
+#                          privilege for the eCommerce server, which both reads
+#                          and writes users:
+#                          "view-users query-users query-groups view-realm manage-users".
+#                          For a read-only app, drop manage-users.
 #
 set -euo pipefail
 
@@ -286,6 +294,65 @@ ensure_admin_user() {
   done
 }
 
+# --- server SA: realm-management client roles ------------------------------
+#
+# The confidential server client queries/manages realm users via the Keycloak
+# admin API using its service-account (client_credentials) token. That SA has no
+# realm-management roles by default, so users.find()/create()/update()/del()
+# return 403 and the dashboard Users page 500s. Grant the SA the minimal set of
+# realm-management CLIENT roles. The eCommerce server's users routes both READ
+# (find/findOne/listCompositeRealmRoleMappings) and WRITE (create/update/del +
+# add/del realm role mappings), so manage-users is required in addition to the
+# read roles. Override with SERVER_SA_REALM_MGMT_ROLES for a read-only app.
+SERVER_SA_REALM_MGMT_ROLES="${SERVER_SA_REALM_MGMT_ROLES:-view-users query-users query-groups view-realm manage-users}"
+
+grant_server_sa_realm_management() {
+  local server_uuid="$1"
+
+  # service-account user of the server client
+  local sa_uid
+  sa_uid="$(kc GET "/admin/realms/${REALM}/clients/${server_uuid}/service-account-user" \
+    | jq -r '.id // empty')"
+  [ -n "$sa_uid" ] || die "server client has no service-account user (serviceAccountsEnabled?)"
+
+  # realm-management client uuid
+  local rm_uuid
+  rm_uuid="$(client_uuid "realm-management")"
+  [ -n "$rm_uuid" ] || die "realm-management client not found in realm '${REALM}'"
+
+  # roles already assigned to the SA from realm-management (for idempotency)
+  local assigned
+  assigned="$(kc GET "/admin/realms/${REALM}/users/${sa_uid}/role-mappings/clients/${rm_uuid}" \
+    | jq -r '.[].name')"
+
+  local want="$SERVER_SA_REALM_MGMT_ROLES"
+  want="${want//,/ }"
+
+  local role rolejson missing_json="[]" already
+  for role in $want; do
+    already="$(printf '%s\n' "$assigned" | grep -Fxq "$role" && echo yes || echo no)"
+    if [ "$already" = "yes" ]; then
+      log "server SA already has realm-management role '${role}'"
+      continue
+    fi
+    rolejson="$(kc GET "/admin/realms/${REALM}/clients/${rm_uuid}/roles/${role}")"
+    if [ "$KC_HTTP_CODE" != "200" ]; then
+      die "realm-management role '${role}' not found (HTTP $KC_HTTP_CODE)"
+    fi
+    missing_json="$(jq -n --argjson acc "$missing_json" --argjson r "$rolejson" \
+      '$acc + [ {id:$r.id, name:$r.name} ]')"
+  done
+
+  if [ "$(printf '%s' "$missing_json" | jq 'length')" = "0" ]; then
+    log "server SA realm-management roles already complete"
+    return 0
+  fi
+  kc POST "/admin/realms/${REALM}/users/${sa_uid}/role-mappings/clients/${rm_uuid}" \
+    "$missing_json" >/dev/null
+  [ "$KC_HTTP_CODE" = "204" ] || die "server SA role assignment failed (HTTP $KC_HTTP_CODE)"
+  log "granted server SA realm-management roles: $(printf '%s' "$missing_json" | jq -r '[.[].name]|join(", ")')"
+}
+
 # --- server client secret -> K8s Secret ------------------------------------
 
 write_server_secret() {
@@ -321,6 +388,7 @@ main() {
   ensure_client "$ADMIN_CLIENT_ID" false >/dev/null
 
   ensure_admin_user
+  grant_server_sa_realm_management "$server_uuid"
   write_server_secret "$server_uuid"
 
   log "realm bootstrap complete for '${REALM}'"
