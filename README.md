@@ -228,6 +228,7 @@ secrets.
 | `admin` + `realm-admin` realm roles | manual realm-role create |
 | The admin user with password set | manual user + password |
 | Realm roles **assigned** to the admin user | manual role assignment |
+| `realm-management` client roles (`view-users`, `query-users`, `query-groups`, `view-realm`, `manage-users`) granted to the server client's **service account** so the app can query/manage realm users (dashboard Users page) | manual SA client-role grant |
 | `<realm>-auth` K8s Secret, key `SERVER_CLIENT_SECRET`, in the tenant namespace | manual secret copy |
 
 The ids/roles/origins mirror `templates/ecommerce/dam-template.json`
@@ -241,7 +242,11 @@ Non-secret params live in the `realm-bootstrap-params` ConfigMap inside
 `KC_URL`, `REALM`, `APP_ADMIN_USER`, `APP_ADMIN_EMAIL`, `APP_ADMIN_FIRST_NAME`,
 `APP_ADMIN_LAST_NAME`, `SERVER_CLIENT_ID`, `CUSTOMER_CLIENT_ID`,
 `ADMIN_CLIENT_ID`, `STOREFRONT_ORIGIN`, `API_ORIGIN`, `ADMIN_ORIGIN`,
-`TARGET_NAMESPACE`, `REALM_ROLES` (default `admin realm-admin`).
+`TARGET_NAMESPACE`, `REALM_ROLES` (default `admin realm-admin`),
+`SERVER_SA_REALM_MGMT_ROLES` (realm-management client roles for the server
+service account; default
+`view-users query-users query-groups view-realm manage-users` -- drop
+`manage-users` for a read-only app).
 
 Secrets: Keycloak master-admin creds come from the existing
 `keycloak-admin-secret` (`KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD`); the
