@@ -17,7 +17,7 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY app/ ./app/
 COPY alembic.ini .
 
-USER appuser
+USER 10001
 
 EXPOSE 8000
 
