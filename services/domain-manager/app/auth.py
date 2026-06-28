@@ -11,6 +11,7 @@ import re
 import sys
 import time
 import urllib.parse
+from collections import deque
 from typing import List, Optional
 
 import httpx
