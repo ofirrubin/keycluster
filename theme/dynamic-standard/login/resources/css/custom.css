@@ -1,4 +1,11 @@
-@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap');
+/* ==========================================================================
+   Modern login theme (shadcn-style warm/orange, glass card).
+   Every tunable is a CSS variable the theme-injector sets from the realm
+   config: --primary-color, --secondary-color, --card-bg, --card-blur,
+   --border-radius, --input-border-radius, --input-focus-color, --icon-color,
+   --font-family, --logo-url. Sane light + dark defaults so it looks good with
+   an empty config. Covers login + register + reset + update-password pages.
+   ========================================================================== */
 
 @font-face {
     font-family: 'Roboto';
@@ -27,187 +34,374 @@
 }
 
 :root {
-    /* Light Mode Defaults */
-    --primary-color: #6366f1;
-    --secondary-color: #4f46e5;
-    --background-color: #f8fafc;
-    --card-bg: rgba(255, 255, 255, 0.8);
-    --text-color: #0f172a;
-    --border-radius: 1.25rem;
-    --input-bg: rgba(255, 255, 255, 0.9);
-    --input-border: #e2e8f0;
-    --label-color: #64748b;
-    --font-family: 'Roboto', 'Inter', system-ui, -apple-system, sans-serif;
+    /* Light-mode defaults */
+    --primary-color: #EA6A2E;
+    --secondary-color: #F0954A;
+    --background-color: #FAF7F4;
+    --card-bg: rgba(255, 255, 255, 0.74);
+    --card-blur: 18px;
+    --text-color: #1c1a17;
+    --muted-text: #6b625a;
+    --border-radius: 20px;
+    --input-border-radius: 12px;
+    --input-bg: rgba(255, 255, 255, 0.72);
+    --input-border: rgba(20, 20, 20, 0.14);
+    --input-focus-color: #EA6A2E;
+    --focus-ring: rgba(234, 106, 46, 0.38);
+    --icon-color: #6b625a;
+    --card-border: rgba(20, 20, 20, 0.08);
+    --card-shadow: 0 24px 64px -22px rgba(80, 40, 10, 0.30), 0 2px 8px rgba(0, 0, 0, 0.04);
+    --autofill-bg: #F3EEE9;
+    --font-family: 'Roboto', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Heebo', sans-serif;
     --logo-url: none;
+    --logo-bg: var(--primary-color);
 }
 
 :root.dark-mode {
-    --background-color: #0f172a;
-    --card-bg: rgba(255, 255, 255, 0.05);
-    --text-color: #f8fafc;
-    --input-bg: rgba(0, 0, 0, 0.2);
-    --input-border: rgba(255, 255, 255, 0.1);
-    --label-color: #94a3b8;
+    --background-color: #17140f;
+    --card-bg: rgba(30, 26, 22, 0.62);
+    --text-color: #ece7e1;
+    --muted-text: #b7ada4;
+    --input-bg: rgba(255, 255, 255, 0.06);
+    --input-border: rgba(255, 255, 255, 0.15);
+    --icon-color: #ece7e1;
+    --card-border: rgba(255, 255, 255, 0.10);
+    --card-shadow: 0 28px 80px -26px rgba(0, 0, 0, 0.65);
+    --autofill-bg: #2a2420;
 }
 
 @media (prefers-color-scheme: dark) {
     :root:not(.light-mode) {
-        --background-color: #0f172a;
-        --card-bg: rgba(255, 255, 255, 0.05);
-        --text-color: #f8fafc;
-        --input-bg: rgba(0, 0, 0, 0.2);
-        --input-border: rgba(255, 255, 255, 0.1);
-        --label-color: #94a3b8;
+        --background-color: #17140f;
+        --card-bg: rgba(30, 26, 22, 0.62);
+        --text-color: #ece7e1;
+        --muted-text: #b7ada4;
+        --input-bg: rgba(255, 255, 255, 0.06);
+        --input-border: rgba(255, 255, 255, 0.15);
+        --icon-color: #ece7e1;
+        --card-border: rgba(255, 255, 255, 0.10);
+        --card-shadow: 0 28px 80px -26px rgba(0, 0, 0, 0.65);
+        --autofill-bg: #2a2420;
     }
 }
 
+/* --- Page background: warm radial gradient --- */
 body {
-    background: url('../img/bg.png') no-repeat center center fixed !important;
-    background-size: cover !important;
+    background: radial-gradient(1100px 640px at 50% -18%, #FCE9DA 0%, var(--background-color) 46%, #F3EEE9 100%) !important;
     color: var(--text-color) !important;
     font-family: var(--font-family) !important;
     margin: 0;
-    height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
 }
 
-/* Glassmorphism Card */
-.login-pf-page .card-pf {
-    background: var(--card-bg) !important;
-    backdrop-filter: blur(16px) !important;
-    -webkit-backdrop-filter: blur(16px) !important;
-    border: 1px solid rgba(255, 255, 255, 0.1) !important;
-    border-radius: var(--border-radius) !important;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5) !important;
-    padding: 3rem !important;
-    max-width: 450px !important;
-    width: 100% !important;
+:root.dark-mode body,
+html.dark-mode body {
+    background: radial-gradient(1100px 640px at 50% -18%, #2a1d12 0%, var(--background-color) 52%, #101013 100%) !important;
+    color: var(--text-color) !important;
 }
 
-.login-pf-page .login-pf-header {
-    margin-bottom: 2rem !important;
+/* --- Centered column layout: brand + logo above the card --- */
+.login-pf-page {
+    background: transparent !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 100dvh !important;
+    padding: 2.75rem 1rem !important;
+    box-sizing: border-box !important;
+    gap: 0.9rem !important;
 }
 
-/* Typography & Labels */
-h1#kc-page-title {
-    font-size: 1.875rem !important;
+.login-pf-page-header,
+#kc-header {
+    background: transparent !important;
+    order: -1 !important;
+    width: auto !important;
+    margin: 0 auto !important;
+}
+
+/* Brand block: logo (native slot) above the realm name text */
+#kc-header-wrapper {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    float: none !important;
+    text-align: center !important;
     font-weight: 700 !important;
-    letter-spacing: -0.025em !important;
-    color: var(--text-color) !important;
-    margin-bottom: 0.5rem !important;
+    font-size: 1.2rem !important;
+    letter-spacing: 0.01em !important;
+    line-height: 1.2 !important;
+    margin: 0 auto 1.3rem !important;
+    padding-top: 0.2rem !important;
+    color: inherit !important;
+    width: auto !important;
+    max-width: 420px !important;
+    text-transform: none !important;
 }
 
-.pf-c-form__label-text,
-label,
-.help-block,
-.instruction {
-    color: var(--label-color) !important;
-    font-weight: 500 !important;
-    font-size: 0.875rem !important;
+/* Logo rendered natively above the card via the shared header wrapper.
+   background-image handles raster AND svg logos identically. */
+#kc-header-wrapper::before {
+    content: "" !important;
+    display: block !important;
+    width: 60px;
+    height: 60px;
+    margin: 0 auto 0.7rem !important;
+    background-image: var(--logo-url, none);
+    background-color: var(--logo-bg);
+    background-size: cover !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    border-radius: 16px !important;
+    box-shadow: 0 10px 24px -10px rgba(234, 106, 46, 0.6) !important;
 }
 
-/* Inputs */
-.form-control {
-    background: var(--input-bg) !important;
-    border: 1px solid var(--input-border) !important;
-    color: var(--text-color) !important;
-    border-radius: var(--border-radius, 0.75rem) !important;
-    padding: 0.75rem 1rem !important;
-    transition: all 0.2s ease, border-radius 0.2s ease !important;
-}
-
-.form-control:focus {
-    border-color: var(--primary-color) !important;
-    box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.2) !important;
-}
-
-/* Buttons */
-.btn-primary {
-    background: linear-gradient(135deg, var(--primary-color), var(--secondary-color)) !important;
-    border: none !important;
-    border-radius: 0.75rem !important;
-    padding: 0.875rem !important;
-    font-weight: 600 !important;
-    letter-spacing: 0.025em !important;
-    transition: transform 0.2s ease, box-shadow 0.2s ease !important;
-    width: 100% !important;
-    margin-top: 1rem !important;
-    color: #fff !important;
-}
-
-.btn-primary:hover {
-    transform: translateY(-1px) !important;
-    box-shadow: 0 10px 15px -3px rgba(99, 102, 241, 0.4) !important;
-}
-
-.btn-primary:active {
-    transform: translateY(0) !important;
-}
-
-/* Logo */
+/* Explicit logo slot, if a template exposes one */
 #kc-logo-wrapper {
     background-image: var(--logo-url) !important;
     background-size: contain !important;
     background-position: center !important;
     background-repeat: no-repeat !important;
-    height: 80px !important;
-    margin-bottom: 2.5rem !important;
-    width: 100% !important;
+    height: 56px !important;
+    margin: 0 auto 1.5rem !important;
     display: block !important;
+    width: 100% !important;
+    max-width: 220px !important;
 }
 
-/* Links */
-#kc-registration span a,
-#kc-login-reset-password a,
-#kc-form-options a,
-.login-pf-signup-link a {
-    color: var(--primary-color) !important;
-    text-decoration: none !important;
-    font-size: 0.875rem !important;
-    transition: color 0.2s ease !important;
-    font-weight: 500 !important;
-}
-
-#kc-registration span a:hover,
-#kc-login-reset-password a:hover,
-#kc-form-options a:hover {
-    filter: brightness(1.2) !important;
-}
-
-/* Dark Mode fixes for generic spans/labels */
-.dark-mode span,
-.dark-mode label,
-.dark-mode .pf-c-check__label {
+/* --- Glass card --- */
+.card-pf,
+.login-pf-page .card-pf {
+    background: var(--card-bg) !important;
+    backdrop-filter: blur(var(--card-blur)) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(var(--card-blur)) saturate(150%) !important;
+    border: 1px solid var(--card-border) !important;
+    border-radius: var(--border-radius) !important;
+    box-shadow: var(--card-shadow) !important;
+    padding: 2.2rem 2.1rem !important;
+    width: 100% !important;
+    max-width: 420px !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: calc(100dvh - 4rem) !important;
+    overflow-y: auto !important;
+    margin: 0 auto !important;
     color: var(--text-color) !important;
 }
 
-/* RTL Support */
-[dir="rtl"] {
+/* --- Title --- */
+html body .login-pf-page #kc-page-title,
+.login-pf-page #kc-page-title,
+#kc-page-title.pf-c-title,
+h1#kc-page-title,
+#kc-page-title {
+    color: inherit !important;
+    font-weight: 700 !important;
+    font-size: 1.55rem !important;
+    line-height: 1.25 !important;
+    letter-spacing: -0.01em !important;
+    text-align: center !important;
+    margin: 0 0 1.3rem !important;
+}
+
+/* --- Labels --- */
+label,
+.pf-c-form__label,
+.pf-c-form__label-text,
+.help-block,
+.instruction {
+    color: inherit !important;
+    opacity: 0.82 !important;
+    font-weight: 500 !important;
+    font-size: 0.875rem !important;
+}
+
+/* RTL: labels right-aligned, inputs stay LTR */
+html.rtl label,
+html.rtl .pf-c-form__label,
+html[dir=rtl] label,
+html[dir=rtl] .pf-c-form__label,
+[dir=rtl] .pf-c-form__group-label {
+    text-align: right !important;
+    display: block !important;
+    width: 100% !important;
+}
+
+html.rtl #kc-form-options,
+html[dir=rtl] #kc-form-options {
     text-align: right !important;
 }
 
-[dir="rtl"] .pf-c-form__group-label {
-    text-align: right !important;
-}
-
-[dir="rtl"] .pf-c-check {
+html.rtl .pf-c-check,
+html[dir=rtl] .pf-c-check {
     padding-left: 0 !important;
     padding-right: 20px !important;
 }
 
-[dir="rtl"] #kc-form-options {
-    text-align: right !important;
+/* --- Inputs (shared shell for plain inputs + password input-group) --- */
+.pf-c-form-control,
+.form-control,
+.pf-c-input-group {
+    background: var(--input-bg) !important;
+    border: 1px solid var(--input-border) !important;
+    border-radius: var(--input-border-radius) !important;
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03) !important;
+    color: var(--text-color) !important;
+    min-height: 46px !important;
+    transition: border-color 0.15s, box-shadow 0.15s !important;
+    overflow: hidden !important;
 }
 
-/* Transitions */
-* {
-    transition: background-color 0.3s cubic-bezier(0.4, 0, 0.2, 1),
-        border-color 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+.pf-c-form-control,
+.form-control {
+    padding: 0.6rem 0.9rem !important;
+    font-size: 0.9rem !important;
 }
 
-/* Hide Native Keycloak Locale Selector */
+/* Password box: single unified group, inner input transparent, eye inside */
+.pf-c-input-group .pf-c-form-control,
+.pf-c-input-group > input {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    border-radius: 0 !important;
+    min-height: 44px !important;
+    flex: 1 1 auto !important;
+}
+
+.pf-c-input-group > .pf-c-button,
+.pf-c-input-group .pf-c-button.pf-m-control {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: var(--icon-color) !important;
+    opacity: 0.7 !important;
+}
+
+.pf-c-input-group .pf-c-button::after,
+.pf-c-input-group .pf-c-button.pf-m-control::after {
+    border: 0 !important;
+    border-bottom: 0 !important;
+    box-shadow: none !important;
+    content: none !important;
+}
+
+/* Eye icon visible in BOTH modes: follows --icon-color */
+.pf-c-input-group .pf-c-button i,
+.pf-c-input-group .pf-c-button svg,
+.pf-c-input-group .pf-c-button::before,
+.pf-c-form-control__toggle-icon,
+.fa-eye,
+.fa-eye-slash {
+    color: var(--icon-color) !important;
+    fill: currentColor !important;
+}
+
+.pf-c-input-group > .pf-c-button:hover,
+.pf-c-input-group > .pf-c-button:hover i,
+.pf-c-input-group > .pf-c-button:hover svg {
+    opacity: 1 !important;
+    color: var(--primary-color) !important;
+    fill: var(--primary-color) !important;
+}
+
+.pf-c-input-group > .pf-c-button:focus,
+.pf-c-input-group > .pf-c-button:active {
+    box-shadow: none !important;
+    outline: none !important;
+    color: var(--primary-color) !important;
+}
+
+/* Focus ring on both plain inputs and the password group */
+.pf-c-form-control:focus,
+.form-control:focus,
+.pf-c-input-group:focus-within {
+    border-color: var(--input-focus-color) !important;
+    box-shadow: 0 0 0 3px var(--focus-ring) !important;
+    outline: none !important;
+}
+
+/* --- Autofill override (light + dark) --- */
+input:-webkit-autofill,
+.pf-c-input-group .pf-c-form-control:-webkit-autofill,
+.pf-c-input-group input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus {
+    -webkit-text-fill-color: var(--text-color) !important;
+    -webkit-box-shadow: 0 0 0 1000px var(--autofill-bg) inset !important;
+    box-shadow: 0 0 0 1000px var(--autofill-bg) inset !important;
+    caret-color: var(--text-color) !important;
+    transition: background-color 9999s ease-in-out 0s !important;
+}
+
+/* --- Primary button: orange gradient --- */
+#kc-login,
+.pf-c-button.pf-m-primary,
+.btn-primary,
+input[type=submit] {
+    background: linear-gradient(180deg, var(--secondary-color), var(--primary-color)) !important;
+    border: none !important;
+    border-radius: var(--input-border-radius) !important;
+    color: #fff !important;
+    font-weight: 600 !important;
+    min-height: 46px !important;
+    width: 100% !important;
+    margin-top: 0.4rem !important;
+    box-shadow: 0 10px 22px -8px rgba(234, 106, 46, 0.6) !important;
+    transition: transform 0.06s, box-shadow 0.15s, filter 0.15s !important;
+}
+
+#kc-login:hover,
+.pf-c-button.pf-m-primary:hover,
+.btn-primary:hover {
+    filter: brightness(1.04) !important;
+    box-shadow: 0 14px 28px -8px rgba(234, 106, 46, 0.72) !important;
+}
+
+#kc-login:active,
+.pf-c-button.pf-m-primary:active,
+.btn-primary:active {
+    transform: translateY(1px) !important;
+}
+
+/* --- Links --- */
+a {
+    color: var(--primary-color) !important;
+    text-decoration: none !important;
+}
+
+a:hover {
+    color: var(--secondary-color) !important;
+    text-decoration: underline !important;
+}
+
+#kc-registration span a,
+#kc-login-reset-password a,
+#kc-form-options a,
+.login-pf-signup-link a {
+    font-size: 0.875rem !important;
+    font-weight: 500 !important;
+}
+
+/* Dark-mode legibility for generic spans/labels/checkboxes */
+.dark-mode span,
+.dark-mode label,
+.dark-mode .pf-c-check__label,
+.dark-mode #kc-registration span,
+.dark-mode #kc-login-reset-password span {
+    color: var(--text-color) !important;
+}
+
+/* --- Footer --- */
+#custom-footer {
+    text-align: center !important;
+    font-size: 0.8rem !important;
+    opacity: 0.6 !important;
+    margin-top: 1.2rem !important;
+    color: var(--muted-text) !important;
+}
+
+/* --- Hide native Keycloak locale selector (injector handles locale) --- */
 #kc-locale,
 .kc-locale-wrapper,
 #kc-locale-dropdown,

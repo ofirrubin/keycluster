@@ -85,6 +85,20 @@
         return `rgba(${r}, ${g}, ${b}, ${alpha})`;
     }
 
+    // --- Page awareness ---
+    // Only the actual login page carries loginTitle / loginButtonText overrides.
+    // Register / reset-password / update-password pages must keep their own strings.
+    function isLoginPage() {
+        if (document.getElementById('kc-register-form')) return false;
+        if (document.getElementById('kc-reset-password-form')) return false;
+        if (document.getElementById('kc-passwd-update-form')) return false;
+        const path = (window.location.pathname || '').toLowerCase();
+        if (path.indexOf('registration') !== -1) return false;
+        if (path.indexOf('reset-credentials') !== -1) return false;
+        if (path.indexOf('login-actions/action-token') !== -1) return false;
+        return !!document.getElementById('kc-form-login');
+    }
+
     function updatePreview(payload) {
         const root = document.documentElement;
 
@@ -166,8 +180,8 @@
         }
     }
 
-    // Helper to append rules without wiping existing ones if possible, 
-    // but here we regenerate relevant ones. 
+    // Helper to append rules without wiping existing ones if possible,
+    // but here we regenerate relevant ones.
     // We only use one style block for live updates to keep it simple.
     function updateDynamicStyle(styleElem, newRules) {
         styleElem.textContent = newRules;
@@ -183,7 +197,7 @@
             borderRadius: parseInt(root.getPropertyValue('--border-radius')) || 4,
             inputBorderRadius: parseInt(root.getPropertyValue('--input-border-radius')) || 4,
             cardBlur: parseInt(root.getPropertyValue('--card-blur')) || 0,
-            // Note: cardBg might be rgba if opacity was set. 
+            // Note: cardBg might be rgba if opacity was set.
             // Editor needs to handle this parsing or we send it raw.
             cardBg: root.getPropertyValue('--card-bg').trim(),
 
@@ -229,6 +243,19 @@
 
     // ... (Existing message listener code) ...
 
+    // Choose the logo variant that matches the active color mode.
+    // Dark-mode logo (logoUrlDark) wins when dark is active and it validates,
+    // otherwise fall back to the standard logoUrl.
+    function applyLogo(config) {
+        const root = document.documentElement;
+        const darkActive = root.classList.contains('dark-mode');
+        const darkLogo = config.logoUrlDark;
+        const chosen = (darkActive && darkLogo && isSafeUrl(darkLogo)) ? darkLogo : config.logoUrl;
+        if (chosen && isSafeUrl(chosen)) {
+            root.style.setProperty('--logo-url', `url(${chosen})`);
+        }
+    }
+
     const configApi = `${window.location.origin}/v1/themes/${encodeURIComponent(realm)}`;
 
     fetch(configApi)
@@ -243,12 +270,60 @@
             if (config.backgroundColor) root.style.setProperty('--background-color', config.backgroundColor);
             if (config.borderRadius) root.style.setProperty('--border-radius', config.borderRadius + 'px');
             if (config.fontFamily) root.style.setProperty('--font-family', config.fontFamily);
-            if (config.logoUrl && isSafeUrl(config.logoUrl)) root.style.setProperty('--logo-url', `url(${config.logoUrl})`);
-            if (config.cardBg) root.style.setProperty('--card-bg', config.cardBg);
+
+            // Card blur (px)
+            if (config.cardBlur !== undefined && config.cardBlur !== null) {
+                root.style.setProperty('--card-blur', parseInt(config.cardBlur, 10) + 'px');
+            }
+
+            // Input radius (px)
+            if (config.inputBorderRadius !== undefined && config.inputBorderRadius !== null) {
+                var cIbr = parseInt(config.inputBorderRadius, 10);
+                if (!isNaN(cIbr) && cIbr >= 0 && cIbr <= 50) {
+                    root.style.setProperty('--input-border-radius', cIbr + 'px');
+                }
+            }
+
+            // Input focus color
+            if (config.inputFocusColor) {
+                root.style.setProperty('--input-focus-color', sanitizeCssValue(config.inputFocusColor));
+            }
+
+            // Icon color (eye toggle, etc.)
+            if (config.iconColor) {
+                root.style.setProperty('--icon-color', sanitizeCssValue(config.iconColor));
+            }
+
+            // Card background + opacity. When both cardBg (hex) and cardOpacity are
+            // present, render an rgba() so the glass card respects the opacity knob.
+            if (config.cardBg && config.cardOpacity !== undefined && config.cardOpacity !== null) {
+                root.style.setProperty('--card-bg', hexToRgba(config.cardBg, config.cardOpacity));
+            } else if (config.cardBg) {
+                root.style.setProperty('--card-bg', config.cardBg);
+            }
+
+            // Logo (dark/light aware)
+            applyLogo(config);
 
             // Re-apply Theme Mode if config specifies it AND no URL override was present
             if (!urlThemeOverride && config.themeMode) {
                 applyMode(config.themeMode);
+                // Mode may have flipped light<->dark; re-pick the matching logo.
+                applyLogo(config);
+            }
+
+            // Follow the OS color scheme live while in "system" mode (no explicit
+            // ui_theme override and config not pinned to light/dark): re-apply both
+            // the mode class and the mode-appropriate logo when the OS toggles.
+            const followsSystem = !urlThemeOverride && (!config.themeMode || config.themeMode === 'system');
+            if (followsSystem && window.matchMedia) {
+                const mq = window.matchMedia('(prefers-color-scheme: dark)');
+                const onSchemeChange = () => {
+                    applyMode('system');
+                    applyLogo(config);
+                };
+                if (mq.addEventListener) mq.addEventListener('change', onSchemeChange);
+                else if (mq.addListener) mq.addListener(onSchemeChange);
             }
 
             // Background
@@ -264,20 +339,28 @@
                 document.head.appendChild(style);
             }
 
-            // Text Overrides & Translations
+            // Text Overrides & Translations.
+            // Per-locale translations win where present. Config loginTitle /
+            // loginButtonText apply ONLY on the real login page so we never
+            // clobber register / reset / update-password titles and buttons.
+            const onLoginPage = isLoginPage();
+
             const titleElem = document.getElementById('kc-page-title') || document.querySelector('h1.pf-c-title');
-            if (titleElem) titleElem.innerText = translations.loginTitle || config.loginTitle || titleElem.innerText;
+            if (titleElem) {
+                const titleText = translations.loginTitle || (onLoginPage ? config.loginTitle : null);
+                if (titleText) titleElem.innerText = titleText;
+            }
 
             const btn = document.getElementById('kc-login');
             if (btn) {
-                const btnText = translations.loginButtonText || config.loginButtonText;
+                const btnText = translations.loginButtonText || (onLoginPage ? config.loginButtonText : null);
                 if (btnText) {
                     if (btn.tagName === 'INPUT') btn.value = btnText;
                     else btn.innerText = btnText;
                 }
             }
 
-            // Footer
+            // Footer (applies on every page)
             const footerText = translations.footerText || config.footerText;
             if (footerText) {
                 let footer = document.getElementById('custom-footer') || document.createElement('div');
