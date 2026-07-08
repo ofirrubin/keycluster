@@ -67,7 +67,7 @@ html.dark-mode body {
     background-position: center !important;
     background-repeat: no-repeat !important;
     border-radius: calc(var(--border-radius) * 0.4) !important;
-    box-shadow: 0 10px 24px -10px rgba(234, 106, 46, 0.6) !important;
+    box-shadow: 0 10px 24px -10px color-mix(in srgb, var(--primary-color) 60%, transparent) !important;
 }
 
 /* Explicit logo slot, if a template exposes one */
