@@ -68,7 +68,7 @@
 }
 
 :root.dark-mode {
-    --background-color: #17140f;
+    --background-color: color-mix(in srgb, #18181B, var(--primary-color) 4%);
     --card-bg: color-mix(in srgb, color-mix(in srgb, #1a1a1e, var(--primary-color) 8%) 62%, transparent);
     --text-color: #ece7e1;
     --muted-text: #b7ada4;
