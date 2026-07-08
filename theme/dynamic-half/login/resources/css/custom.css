@@ -38,10 +38,15 @@
 }
 
 :root {
-    /* Light-mode defaults */
+    /* Light-mode defaults. --card-bg/--background-color are a NEUTRAL base
+       blended with a very faint amount of --primary-color via color-mix(),
+       so the surface tint tracks whatever color the realm picks (orange
+       primary -> faint orange card, blue primary -> faint blue card)
+       instead of a fixed hue -- only applies when the realm hasn't set an
+       explicit cardBg (the injector still overrides these when it has). */
     --primary-color: #EA6A2E;
     --secondary-color: #F0954A;
-    --background-color: #FAF7F4;
+    --background-color: color-mix(in srgb, #F7F7F8, var(--primary-color) 3%);
     --card-bg: color-mix(in srgb, color-mix(in srgb, #ffffff, var(--primary-color) 4%) 74%, transparent);
     --card-opacity: 0.74;
     --card-blur: 18px;
@@ -63,7 +68,7 @@
 }
 
 :root.dark-mode {
-    --background-color: #17140f;
+    --background-color: color-mix(in srgb, #18181B, var(--primary-color) 4%);
     --card-bg: color-mix(in srgb, color-mix(in srgb, #1a1a1e, var(--primary-color) 8%) 62%, transparent);
     --text-color: #ece7e1;
     --muted-text: #b7ada4;
@@ -77,7 +82,7 @@
 
 @media (prefers-color-scheme: dark) {
     :root:not(.light-mode) {
-        --background-color: #17140f;
+        --background-color: color-mix(in srgb, #18181B, var(--primary-color) 4%);
         --card-bg: color-mix(in srgb, color-mix(in srgb, #1a1a1e, var(--primary-color) 8%) 62%, transparent);
         --text-color: #ece7e1;
         --muted-text: #b7ada4;
