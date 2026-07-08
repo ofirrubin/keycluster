@@ -296,6 +296,11 @@
 
             // Card background + opacity. When both cardBg (hex) and cardOpacity are
             // present, render an rgba() so the glass card respects the opacity knob.
+            // --card-opacity is also set on its own so pack CSS can reference the
+            // raw knob directly (e.g. non-color layers, borders, gradients).
+            if (config.cardOpacity !== undefined && config.cardOpacity !== null) {
+                root.style.setProperty('--card-opacity', config.cardOpacity);
+            }
             if (config.cardBg && config.cardOpacity !== undefined && config.cardOpacity !== null) {
                 root.style.setProperty('--card-bg', hexToRgba(config.cardBg, config.cardOpacity));
             } else if (config.cardBg) {
