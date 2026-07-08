@@ -87,9 +87,12 @@ html.dark-mode body {
 .card-pf,
 .login-pf-page .card-pf {
     background: var(--card-bg) !important;
-    backdrop-filter: blur(var(--card-blur)) saturate(150%) !important;
-    -webkit-backdrop-filter: blur(var(--card-blur)) saturate(150%) !important;
-    border: 1px solid var(--card-border) !important;
+    backdrop-filter: blur(var(--card-blur, 0px)) saturate(150%) !important;
+    -webkit-backdrop-filter: blur(var(--card-blur, 0px)) saturate(150%) !important;
+    /* --card-opacity fades the border independently of --card-bg's own alpha,
+       so the raw 0-1 knob has a visible effect even when cardBg is set
+       without cardOpacity (no rgba() baked in by the injector). */
+    border: 1px solid color-mix(in srgb, var(--card-border) calc(var(--card-opacity, 1) * 100%), transparent) !important;
     border-radius: var(--border-radius) !important;
     box-shadow: var(--card-shadow) !important;
     padding: 2.2rem 2.1rem !important;

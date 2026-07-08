@@ -83,9 +83,14 @@ html.dark-mode body {
 .card-pf,
 .login-pf-page .card-pf {
     background: var(--card-bg) !important;
-    backdrop-filter: none !important;
-    -webkit-backdrop-filter: none !important;
-    border: 1px solid var(--card-border) !important;
+    /* Flat by default (solid card-bg has nothing translucent to blur), but the
+       knob is genuinely wired: lowering --card-opacity reveals the page
+       background through the card and this blur then becomes visible. */
+    backdrop-filter: blur(var(--card-blur, 0px)) !important;
+    -webkit-backdrop-filter: blur(var(--card-blur, 0px)) !important;
+    /* --card-opacity fades the border independently of --card-bg's own alpha,
+       so the raw 0-1 knob has a visible effect on its own. */
+    border: 1px solid color-mix(in srgb, var(--card-border) calc(var(--card-opacity, 1) * 100%), transparent) !important;
     border-radius: var(--border-radius) !important;
     box-shadow: var(--card-shadow) !important;
     padding: 2rem 1.9rem !important;
