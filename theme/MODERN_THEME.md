@@ -120,8 +120,6 @@ the `onguard` realm via `POST /v1/themes/onguard`:
   "themeName": "dynamic-standard",
   "primaryColor": "#EA6A2E",
   "secondaryColor": "#F0954A",
-  "backgroundColor": "#17140f",
-  "cardBg": "#201b17",
   "themeMode": "dark",
   "borderRadius": 20,
   "inputBorderRadius": 12,
@@ -135,7 +133,20 @@ the `onguard` realm via `POST /v1/themes/onguard`:
 }
 ```
 
-No `customCss`. Swap `themeName` to `dynamic-half` or `dynamic-clean` for the
-split-screen or flat-card variants -- the same config values apply because
-every pack resolves the identical variable contract, just with different
-layout.css structure and (on `clean`) a flatter shadow/radius scale.
+No `customCss`, and deliberately no `backgroundColor`/`cardBg` overrides:
+`themeMode: "dark"` alone is enough to get the dark glass-card look, because
+each pack's own `.dark-mode` tokens supply a dark `--card-bg` and light
+`--text-color` together. A pinned `backgroundColor`/`cardBg` used to fight
+that pairing -- fixing them to the dark hex made LIGHT mode render dark text
+on a dark card (unreadable) if the realm or an admin ever toggled/previewed
+light mode, since the injector's inline override wins over the pack's own
+light-mode `:root` tokens regardless of which mode is active. Leaving them
+unset keeps both modes legible at all times; `THEME_DEFAULTS.cardBg`/
+`backgroundColor` are `null` for the same reason (see themes.ts comment).
+
+Swap `themeName` to `dynamic-half` or `dynamic-clean` for the split-screen or
+flat-card variants -- the same config values apply because every pack
+resolves the identical variable contract, just with different layout.css
+structure and (on `clean`) a flatter shadow/radius scale plus fully **neutral
+grey** surfaces (no warm tint) rather than standard/half's warm-by-design
+palette; the orange primary/secondary accent is unchanged across all three.
