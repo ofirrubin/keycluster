@@ -38,55 +38,56 @@
 }
 
 :root {
-    /* Light-mode defaults */
+    /* Light-mode defaults -- neutral grey surfaces (no warm tint); the
+       orange primary/secondary accent is the only warm color in this pack. */
     --primary-color: #EA6A2E;
     --secondary-color: #F0954A;
-    --background-color: #FAF7F4;
+    --background-color: #F7F7F8;
     --card-bg: #FFFFFF;
     --card-opacity: 1;
     --card-blur: 0px;
-    --text-color: #1c1a17;
-    --muted-text: #6b625a;
+    --text-color: #18181B;
+    --muted-text: #71717A;
     --border-radius: 14px;
     --input-border-radius: 10px;
     --input-bg: #FFFFFF;
-    --input-border: rgba(20, 20, 20, 0.16);
+    --input-border: rgba(0, 0, 0, 0.14);
     --input-focus-color: #EA6A2E;
     --focus-ring: color-mix(in srgb, var(--primary-color) 38%, transparent);
-    --icon-color: #6b625a;
-    --card-border: rgba(20, 20, 20, 0.10);
-    --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px -12px rgba(20, 10, 0, 0.16);
-    --autofill-bg: #F3EEE9;
+    --icon-color: #71717A;
+    --card-border: rgba(0, 0, 0, 0.10);
+    --card-shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 8px 24px -12px rgba(0, 0, 0, 0.14);
+    --autofill-bg: #F4F4F5;
     --font-family: 'Roboto', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Heebo', sans-serif;
     --logo-url: none;
     --logo-bg: var(--primary-color);
 }
 
 :root.dark-mode {
-    --background-color: #17140f;
-    --card-bg: #201b17;
-    --text-color: #ece7e1;
-    --muted-text: #b7ada4;
-    --input-bg: #17140f;
-    --input-border: rgba(255, 255, 255, 0.16);
-    --icon-color: #ece7e1;
-    --card-border: rgba(255, 255, 255, 0.12);
+    --background-color: #18181B;
+    --card-bg: #1F1F23;
+    --text-color: #F4F4F5;
+    --muted-text: #A1A1AA;
+    --input-bg: #141416;
+    --input-border: rgba(255, 255, 255, 0.14);
+    --icon-color: #F4F4F5;
+    --card-border: rgba(255, 255, 255, 0.10);
     --card-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 12px 32px -16px rgba(0, 0, 0, 0.6);
-    --autofill-bg: #2a2420;
+    --autofill-bg: #26262A;
 }
 
 @media (prefers-color-scheme: dark) {
     :root:not(.light-mode) {
-        --background-color: #17140f;
-        --card-bg: #201b17;
-        --text-color: #ece7e1;
-        --muted-text: #b7ada4;
-        --input-bg: #17140f;
-        --input-border: rgba(255, 255, 255, 0.16);
-        --icon-color: #ece7e1;
-        --card-border: rgba(255, 255, 255, 0.12);
+        --background-color: #18181B;
+        --card-bg: #1F1F23;
+        --text-color: #F4F4F5;
+        --muted-text: #A1A1AA;
+        --input-bg: #141416;
+        --input-border: rgba(255, 255, 255, 0.14);
+        --icon-color: #F4F4F5;
+        --card-border: rgba(255, 255, 255, 0.10);
         --card-shadow: 0 1px 0 rgba(255, 255, 255, 0.03), 0 12px 32px -16px rgba(0, 0, 0, 0.6);
-        --autofill-bg: #2a2420;
+        --autofill-bg: #26262A;
     }
 }
 
