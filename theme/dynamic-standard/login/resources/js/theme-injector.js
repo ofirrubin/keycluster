@@ -263,6 +263,37 @@
         else if (reducedMotionQuery.addListener) reducedMotionQuery.addListener(onReducedMotionChange);
     }
 
+    // Card/page enter animation TYPE -- independent of the animation LEVEL
+    // above (anim-none still wins and disables it, same as reduced-motion).
+    const ANIMSTYLE_CLASSES = ['animstyle-rise', 'animstyle-fade', 'animstyle-scale', 'animstyle-slide'];
+    const applyAnimationStyle = (style) => {
+        const cls = 'animstyle-' + style;
+        const effective = ANIMSTYLE_CLASSES.indexOf(cls) !== -1 ? cls : 'animstyle-rise';
+        const root = document.documentElement;
+        ANIMSTYLE_CLASSES.forEach((c) => root.classList.remove(c));
+        root.classList.add(effective);
+    };
+    applyAnimationStyle('rise');
+
+    // Loader/spinner variant, colored from --primary-color via pack CSS.
+    // Also tags Keycloak's own PatternFly loading indicator (if the current
+    // page renders one) so it picks up the same color/variant class.
+    const LOADER_CLASSES = ['loader-spinner', 'loader-dots', 'loader-bars', 'loader-pulse'];
+    const applyLoader = (style) => {
+        const cls = 'loader-' + style;
+        const effective = LOADER_CLASSES.indexOf(cls) !== -1 ? cls : 'loader-spinner';
+        const root = document.documentElement;
+        LOADER_CLASSES.forEach((c) => root.classList.remove(c));
+        root.classList.add(effective);
+        if (document.querySelectorAll) {
+            document.querySelectorAll('.pf-c-spinner').forEach((el) => {
+                LOADER_CLASSES.forEach((c) => el.classList.remove(c));
+                el.classList.add(effective);
+            });
+        }
+    };
+    applyLoader('spinner');
+
     // ... (Existing message listener code) ...
 
     // Choose the logo variant that matches the active color mode.
@@ -296,6 +327,8 @@
             // Animation level (none/subtle/playful) -- applyAnimation() itself
             // re-checks prefers-reduced-motion, so the config value never overrides it
             if (config.animation) applyAnimation(config.animation);
+            if (config.animationStyle) applyAnimationStyle(config.animationStyle);
+            if (config.loader) applyLoader(config.loader);
 
             // Card blur (px)
             if (config.cardBlur !== undefined && config.cardBlur !== null) {
