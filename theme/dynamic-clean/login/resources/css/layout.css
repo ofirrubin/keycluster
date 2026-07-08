@@ -1,0 +1,100 @@
+/* ==========================================================================
+   "clean" pack layout: flat solid background, flat solid card -- no blur,
+   no layered glass, minimal shadow, tighter radius. Loaded after custom.css
+   (see theme.properties) so it can rely on the tokens defined there.
+   ========================================================================== */
+
+body {
+    background: var(--background-color) !important;
+}
+
+:root.dark-mode body,
+html.dark-mode body {
+    background: var(--background-color) !important;
+}
+
+.login-pf-page {
+    background: transparent !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    justify-content: center !important;
+    min-height: 100dvh !important;
+    padding: 2.5rem 1rem !important;
+    box-sizing: border-box !important;
+    gap: 0.85rem !important;
+}
+
+.login-pf-page-header,
+#kc-header {
+    background: transparent !important;
+    order: -1 !important;
+    width: auto !important;
+    margin: 0 auto !important;
+}
+
+/* Brand block: logo (native slot) above the realm name text */
+#kc-header-wrapper {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    float: none !important;
+    text-align: center !important;
+    font-weight: 700 !important;
+    font-size: 1.1rem !important;
+    letter-spacing: 0.01em !important;
+    line-height: 1.2 !important;
+    margin: 0 auto 1.1rem !important;
+    color: inherit !important;
+    width: auto !important;
+    max-width: 400px !important;
+    text-transform: none !important;
+}
+
+/* Logo rendered natively above the card via the shared header wrapper. */
+#kc-header-wrapper::before {
+    content: "" !important;
+    display: block !important;
+    width: 52px;
+    height: 52px;
+    margin: 0 auto 0.6rem !important;
+    background-image: var(--logo-url, none);
+    background-color: var(--logo-bg);
+    background-size: cover !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    border-radius: calc(var(--border-radius) * 0.5) !important;
+}
+
+/* Explicit logo slot, if a template exposes one */
+#kc-logo-wrapper {
+    background-image: var(--logo-url) !important;
+    background-size: contain !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    height: 48px !important;
+    margin: 0 auto 1.3rem !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: 200px !important;
+}
+
+/* --- Flat solid card: no blur, minimal shadow, hairline border --- */
+.card-pf,
+.login-pf-page .card-pf {
+    background: var(--card-bg) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: 1px solid var(--card-border) !important;
+    border-radius: var(--border-radius) !important;
+    box-shadow: var(--card-shadow) !important;
+    padding: 2rem 1.9rem !important;
+    width: 100% !important;
+    max-width: 400px !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: calc(100dvh - 4rem) !important;
+    overflow-y: auto !important;
+    margin: 0 auto !important;
+    color: var(--text-color) !important;
+}
