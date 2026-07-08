@@ -241,6 +241,28 @@
     };
     applyMode(localMode);
 
+    // Animation level: <html class="anim-none|anim-subtle|anim-playful"> gates
+    // hover/press/enter transitions in pack CSS. Same class contract the magma
+    // theme-studio preview sets. prefers-reduced-motion always wins over the
+    // configured level, applied immediately (default 'subtle') and re-applied
+    // once the realm config loads.
+    const ANIM_CLASSES = ['anim-none', 'anim-subtle', 'anim-playful'];
+    const reducedMotionQuery = window.matchMedia ? window.matchMedia('(prefers-reduced-motion: reduce)') : null;
+    let configuredAnimationLevel = 'subtle';
+    const applyAnimation = (level) => {
+        configuredAnimationLevel = ANIM_CLASSES.indexOf('anim-' + level) !== -1 ? level : 'subtle';
+        const effective = (reducedMotionQuery && reducedMotionQuery.matches) ? 'none' : configuredAnimationLevel;
+        const root = document.documentElement;
+        ANIM_CLASSES.forEach((cls) => root.classList.remove(cls));
+        root.classList.add('anim-' + effective);
+    };
+    applyAnimation('subtle');
+    if (reducedMotionQuery) {
+        const onReducedMotionChange = () => applyAnimation(configuredAnimationLevel);
+        if (reducedMotionQuery.addEventListener) reducedMotionQuery.addEventListener('change', onReducedMotionChange);
+        else if (reducedMotionQuery.addListener) reducedMotionQuery.addListener(onReducedMotionChange);
+    }
+
     // ... (Existing message listener code) ...
 
     // Choose the logo variant that matches the active color mode.
@@ -270,6 +292,10 @@
             if (config.backgroundColor) root.style.setProperty('--background-color', config.backgroundColor);
             if (config.borderRadius) root.style.setProperty('--border-radius', config.borderRadius + 'px');
             if (config.fontFamily) root.style.setProperty('--font-family', config.fontFamily);
+
+            // Animation level (none/subtle/playful) -- applyAnimation() itself
+            // re-checks prefers-reduced-motion, so the config value never overrides it
+            if (config.animation) applyAnimation(config.animation);
 
             // Card blur (px)
             if (config.cardBlur !== undefined && config.cardBlur !== null) {
