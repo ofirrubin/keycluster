@@ -61,6 +61,52 @@ palette defined in each pack's `custom.css`. RTL: `html[dir=rtl]` /
 `html.rtl` mirror text alignment everywhere and, on `half`, swap which grid
 column holds the branding pane vs. the form.
 
+Every glow/box-shadow/focus-ring that reads as a brand color is derived from
+`--primary-color` via `color-mix(in srgb, var(--primary-color) X%,
+transparent)` -- never a hardcoded hex/rgba. The only literal color values
+left in the CSS are neutral black/white elevation tints (`--card-shadow`,
+input shadows) and the `:root` *default* values of the color vars themselves,
+which have to be concrete somewhere.
+
+Buttons render as `<button>`/`<input type=submit>` on the login form but as
+`<a class="pf-c-button pf-m-primary pf-m-block">` on error/info/logout pages.
+`.pf-c-button.pf-m-primary` (and `.pf-m-secondary`) carry `display:flex;
+align-items:center; justify-content:center; text-decoration:none` so the
+label centers on both axes and gets the gradient/border regardless of tag.
+
+Inputs are explicit `width:100% !important` (not left to Keycloak's own
+PatternFly base CSS) so two-column layouts (register, update-profile) fill
+their column instead of shrinking to content.
+
+The remember-me / consent checkbox (`.checkbox input[type=checkbox]`,
+`.login-pf-settings input[type=checkbox]`, and the PatternFly
+`.pf-c-check__input`) is restyled into a custom control: native box hidden via
+`appearance:none`, a rounded box drawn with `--input-border-radius`, filled
+with `--primary-color` + a CSS-drawn checkmark (`::after` border-clip, no
+image asset) on `:checked`, and a `--focus-ring` outline on
+`:focus-visible`. Same markup coverage in all three packs.
+
+## Animation knob
+
+`animation` (`"none" | "subtle" | "playful"`, default `"subtle"`) is a native
+knob in `ThemeConfigSchema` (`libs/keycluster-core/src/theme-schema.ts`) and
+`THEME_DEFAULTS`. `theme-injector.js` sets `<html class="anim-none |
+anim-subtle | anim-playful">` from the resolved config -- the same class
+contract the magma theme-studio preview (`ThemePreview.tsx`) sets, so the
+live page and the offline preview animate identically.
+
+| Level | What it does |
+| --- | --- |
+| `none` | `html.anim-none *,*::before,*::after { transition:none; animation:none }` -- every hover/press/enter effect off. |
+| `subtle` (default) | The hover/press transitions already defined in the component layer (border-color/box-shadow fades, `scale(0.98)` button press) plus a gentle card enter: `kc-card-enter` keyframe, fade + 12px rise, `0.42s cubic-bezier(0.2, 0, 0, 1)`. |
+| `playful` | Same enter keyframe but `0.5s cubic-bezier(0.16, 1, 0.3, 1)`; primary-button hover/press transitions speed up to `0.12s` and lift `translateY(-2px)` on hover. No overshoot/spring bounce anywhere -- snappier and more pronounced, never jarring. |
+
+`@media (prefers-reduced-motion: reduce)` forces `transition:none;
+animation:none` on every element as a CSS-level backstop, independent of the
+JS class -- the injector also checks `matchMedia('(prefers-reduced-motion:
+reduce)')` itself and overrides the configured level to `none`, live, via a
+`change` listener (covers the OS setting flipping mid-session).
+
 ## Reproducing the ecommerce look with zero customCss
 
 `libs/keycluster-core/src/themes.ts` `THEME_DEFAULTS` was updated to exactly
@@ -84,6 +130,7 @@ the `onguard` realm via `POST /v1/themes/onguard`:
   "inputFocusColor": "#EA6A2E",
   "fontFamily": "'Roboto', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Heebo', sans-serif",
   "footerText": "Secured by Keycluster",
+  "animation": "subtle",
   "customCss": ""
 }
 ```
