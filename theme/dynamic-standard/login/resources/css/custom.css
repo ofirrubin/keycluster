@@ -242,15 +242,23 @@ input:-webkit-autofill:focus {
 }
 
 /* --- Primary button: gradient driven by --secondary-color -> --primary-color --- */
+/* Buttons render as <button>/<input> OR <a class="pf-c-button pf-m-primary">
+   on error/info/logout pages -- flex + text-align keep the label centered on
+   both axes and text-decoration:none strips the anchor underline. */
 #kc-login,
 .pf-c-button.pf-m-primary,
 .btn-primary,
 input[type=submit] {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     background: linear-gradient(var(--secondary-color), var(--primary-color)) !important;
     border: none !important;
     border-radius: var(--input-border-radius) !important;
     color: #fff !important;
     font-weight: 600 !important;
+    text-align: center !important;
+    text-decoration: none !important;
     min-height: 46px !important;
     width: 100% !important;
     margin-top: 0.4rem !important;
@@ -274,11 +282,16 @@ input[type=submit] {
 /* --- Secondary / social buttons --- */
 .pf-c-button.pf-m-secondary,
 .kc-social-providers .pf-c-button {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
     background: var(--input-bg) !important;
     border: 1px solid var(--input-border) !important;
     border-radius: var(--input-border-radius) !important;
     color: var(--text-color) !important;
     font-weight: 500 !important;
+    text-align: center !important;
+    text-decoration: none !important;
     min-height: 44px !important;
     transition: border-color 0.15s, transform 0.06s !important;
 }
