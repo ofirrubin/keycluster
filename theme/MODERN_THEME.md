@@ -24,26 +24,36 @@ Each pack now ships two stylesheets (`theme.properties` lists both under
     realm name, left-aligned), right column = flat form pane, both full
     viewport height. Collapses to a stacked layout (branding banner on top,
     card below) under `max-width: 991px`. RTL flips the columns.
-  - **clean**: flat solid card, no `backdrop-filter`, tighter radius,
-    minimal shadow -- the "no glass, no gradient background" option.
+  - **clean**: flat solid card, tighter radius, minimal shadow -- the "no
+    glass, no gradient background" option. Blur/opacity knobs are still wired
+    (see below); they're just inert at the pack's own opaque defaults.
+
+Every variable in the contract is wired on **every** pack -- including
+`--card-blur` and `--card-opacity` on `half`/`clean`, which default to an
+opaque card (nothing to blur, by design) but genuinely respond the moment a
+realm lowers `cardOpacity` below 1. `.card-pf` on all three packs carries
+`backdrop-filter: blur(var(--card-blur, 0px))`, and its border color runs
+through `color-mix(in srgb, var(--card-border) calc(var(--card-opacity, 1) *
+100%), transparent)` so the raw opacity knob has an effect independent of
+whatever alpha the injector already baked into `--card-bg`.
 
 ## CSS variable -> visual map
 
-| Variable | Visual effect |
-| --- | --- |
-| `--primary-color` | Gradient button end color, link color, focus accent base, standard/clean logo chip background |
-| `--secondary-color` | Gradient button start color, half-pack branding pane gradient start, link hover color |
-| `--background-color` | Page background base color (radial gradient center on standard/half without an image, solid fill on clean) |
-| `--card-bg` | Card surface color/alpha. The injector renders this as an `rgba()` from `cardBg` (hex) + `cardOpacity` when both are set |
-| `--card-opacity` | Raw 0-1 opacity knob, set independently of `--card-bg` so pack CSS can reference it directly (e.g. a non-color layer) |
-| `--card-blur` | `backdrop-filter: blur()` amount on standard/half glass cards; ignored (0px) on clean by design |
-| `--border-radius` | Card corner radius (concentric: logo chip radius derives from it via `calc()`) |
-| `--input-border-radius` | Input, password-group, and primary/secondary button corner radius |
-| `--input-focus-color` | Input focus border + `--focus-ring` accent color |
-| `--icon-color` | Password-toggle eye icon color (both light/dark) |
-| `--logo-url` | Header logo `background-image` (standard/clean: centered chip above card; half: left-aligned in the branding pane) |
-| `--font-family` | Body/label/title font stack |
-| `backgroundUrl` (config, not a var) | Full-bleed `body` background image, applied as an inline style by the injector so it wins over the CSS gradient fallback |
+| Variable | Visual effect | standard | half | clean |
+| --- | --- | --- | --- | --- |
+| `--primary-color` | Gradient button end color, link color, focus accent base, logo chip / branding-pane gradient | yes | yes | yes |
+| `--secondary-color` | Gradient button start color, half-pack branding pane gradient start, link hover color | yes | yes | yes |
+| `--background-color` | Page background base color (radial gradient center on standard, solid fill on half/clean) | yes | yes | yes |
+| `--card-bg` | Card surface color/alpha (injector renders `rgba()` from `cardBg` + `cardOpacity` when both are set) | yes | yes | yes |
+| `--card-opacity` | Raw 0-1 knob; fades the card border via `color-mix()` independent of `--card-bg`'s own alpha | yes (border) | yes (separator border) | yes (border) |
+| `--card-blur` | `backdrop-filter: blur()` on `.card-pf`; visibly frosts the glass card on standard by default, and on half/clean the moment `cardOpacity < 1` makes the card translucent | yes (default-visible) | yes (visible once translucent) | yes (visible once translucent) |
+| `--border-radius` | Card corner radius (concentric: logo chip radius derives from it via `calc()`) | yes | yes | yes |
+| `--input-border-radius` | Input, password-group, and primary/secondary button corner radius | yes | yes | yes |
+| `--input-focus-color` | Input focus border + `--focus-ring` accent color | yes | yes | yes |
+| `--icon-color` | Password-toggle eye icon color (both light/dark) | yes | yes | yes |
+| `--logo-url` | Header logo `background-image` (standard/clean: centered chip above card; half: left-aligned in the branding pane) | yes | yes | yes |
+| `--font-family` | Body/label/title font stack | yes | yes | yes |
+| `backgroundUrl` (config, not a var) | Full-bleed `body` background image, applied as an inline style by the injector so it wins over the CSS gradient fallback | yes | yes | yes |
 
 Dark mode: `html.dark-mode` (explicit) or `@media (prefers-color-scheme: dark)`
 (system, when no explicit mode is set) swap the token values to the dark
