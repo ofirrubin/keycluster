@@ -408,6 +408,66 @@ a:hover {
     color: var(--text-color) !important;
 }
 
+/* ==========================================================================
+   Animation knob -- <html class="anim-none|anim-subtle|anim-playful">, set by
+   theme-injector.js from the realm config (same class contract the magma
+   theme-studio preview uses). anim-subtle keeps the hover/press transitions
+   already defined above (scale(0.98) presses, border-color fades) and adds a
+   gentle card enter (fade + rise). anim-playful is snappier and more
+   pronounced (faster easing, bigger button lift) but never overshoots -- no
+   bounce, per interface-polish guidance. anim-none turns all of it off.
+   prefers-reduced-motion always wins, independent of the configured level.
+   ========================================================================== */
+@keyframes kc-card-enter {
+    from {
+        opacity: 0;
+        transform: translateY(12px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+html.anim-subtle .card-pf {
+    animation: kc-card-enter 0.42s cubic-bezier(0.2, 0, 0, 1) both;
+}
+
+html.anim-playful .card-pf {
+    animation: kc-card-enter 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+html.anim-playful #kc-login,
+html.anim-playful .pf-c-button.pf-m-primary,
+html.anim-playful .btn-primary,
+html.anim-playful input[type=submit] {
+    transition: transform 0.12s cubic-bezier(0.2, 0, 0, 1), box-shadow 0.12s, filter 0.12s !important;
+}
+
+html.anim-playful #kc-login:hover,
+html.anim-playful .pf-c-button.pf-m-primary:hover,
+html.anim-playful .btn-primary:hover {
+    transform: translateY(-2px) !important;
+}
+
+html.anim-none *,
+html.anim-none *::before,
+html.anim-none *::after {
+    transition: none !important;
+    animation: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        transition: none !important;
+        animation: none !important;
+    }
+}
+
 /* --- Footer --- */
 #custom-footer {
     text-align: left !important;
