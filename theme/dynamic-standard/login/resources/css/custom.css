@@ -146,9 +146,14 @@ html[dir=rtl] .pf-c-check {
 }
 
 /* --- Inputs (shared shell for plain inputs + password input-group) --- */
+/* width:100% is explicit (not left to Keycloak's own PatternFly base CSS) so
+   every field -- including the two-column profile/register layout -- fills
+   its column instead of shrinking to content. */
 .pf-c-form-control,
 .form-control,
 .pf-c-input-group {
+    box-sizing: border-box !important;
+    width: 100% !important;
     background: var(--input-bg) !important;
     border: 1px solid var(--input-border) !important;
     border-radius: var(--input-border-radius) !important;
