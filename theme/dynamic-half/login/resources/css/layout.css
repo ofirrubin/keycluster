@@ -1,0 +1,173 @@
+/* ==========================================================================
+   "half" pack layout: split-screen -- a branding pane (logo + realm name over
+   a primary/secondary gradient) beside a flat form pane. Collapses to a
+   stacked layout under 992px. Loaded after custom.css (see theme.properties)
+   so it can rely on the tokens defined there.
+   ========================================================================== */
+
+body {
+    background: var(--background-color) !important;
+    margin: 0 !important;
+}
+
+:root.dark-mode body,
+html.dark-mode body {
+    background: var(--background-color) !important;
+}
+
+.login-pf-page {
+    background: transparent !important;
+    display: grid !important;
+    grid-template-columns: 1.15fr minmax(360px, 520px) !important;
+    min-height: 100dvh !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    gap: 0 !important;
+}
+
+/* --- Left: branding pane, full-height gradient, logo + realm name --- */
+.login-pf-page-header,
+#kc-header {
+    grid-column: 1 !important;
+    grid-row: 1 / -1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: flex-start !important;
+    justify-content: center !important;
+    background: linear-gradient(155deg, var(--secondary-color), var(--primary-color)) !important;
+    padding: 4rem clamp(2rem, 6vw, 5rem) !important;
+    margin: 0 !important;
+    color: #fff !important;
+}
+
+#kc-header-wrapper {
+    position: static !important;
+    inset: auto !important;
+    transform: none !important;
+    float: none !important;
+    text-align: left !important;
+    font-weight: 700 !important;
+    font-size: 1.6rem !important;
+    letter-spacing: -0.01em !important;
+    line-height: 1.25 !important;
+    text-wrap: balance !important;
+    margin: 0 !important;
+    color: #fff !important;
+    width: 100% !important;
+    max-width: 440px !important;
+    text-transform: none !important;
+}
+
+#kc-header-wrapper::before {
+    content: "" !important;
+    display: block !important;
+    width: 60px;
+    height: 60px;
+    margin: 0 0 1.75rem !important;
+    background-image: var(--logo-url, none);
+    background-color: var(--logo-bg);
+    background-size: cover !important;
+    background-position: center !important;
+    background-repeat: no-repeat !important;
+    border-radius: calc(var(--border-radius) * 0.4) !important;
+    box-shadow: 0 10px 24px -10px rgba(0, 0, 0, 0.35) !important;
+}
+
+#kc-logo-wrapper {
+    background-image: var(--logo-url) !important;
+    background-size: contain !important;
+    background-position: left center !important;
+    background-repeat: no-repeat !important;
+    height: 56px !important;
+    margin: 0 0 1.5rem !important;
+    display: block !important;
+    width: 100% !important;
+    max-width: 220px !important;
+}
+
+/* --- Right: flat form pane, full height, no glass --- */
+.card-pf,
+.login-pf-page .card-pf {
+    grid-column: 2 !important;
+    grid-row: 1 / -1 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    background: var(--card-bg) !important;
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+    border: none !important;
+    border-inline-start: 1px solid var(--card-border) !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    padding: 3rem clamp(2rem, 5vw, 4rem) !important;
+    width: 100% !important;
+    max-width: none !important;
+    min-height: 100dvh !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow-y: auto !important;
+    margin: 0 !important;
+    color: var(--text-color) !important;
+}
+
+/* --- Collapse below 992px: branding becomes a compact top banner --- */
+@media (max-width: 991px) {
+    .login-pf-page {
+        display: flex !important;
+        flex-direction: column !important;
+        min-height: 100dvh !important;
+    }
+
+    .login-pf-page-header,
+    #kc-header {
+        padding: 2.25rem 1.5rem !important;
+        align-items: center !important;
+    }
+
+    #kc-header-wrapper {
+        text-align: center !important;
+        max-width: none !important;
+        align-items: center !important;
+    }
+
+    #kc-header-wrapper::before {
+        margin: 0 auto 1rem !important;
+    }
+
+    .card-pf,
+    .login-pf-page .card-pf {
+        border-inline-start: none !important;
+        border-radius: var(--border-radius) var(--border-radius) 0 0 !important;
+        box-shadow: 0 -12px 32px -16px rgba(0, 0, 0, 0.18) !important;
+        margin-top: -1.25rem !important;
+        min-height: 0 !important;
+        flex: 1 !important;
+    }
+}
+
+/* RTL: branding pane flips to the right */
+html.rtl .login-pf-page,
+html[dir=rtl] .login-pf-page {
+    grid-template-columns: minmax(360px, 520px) 1.15fr !important;
+}
+
+html.rtl .login-pf-page-header,
+html.rtl #kc-header,
+html[dir=rtl] .login-pf-page-header,
+html[dir=rtl] #kc-header {
+    grid-column: 2 !important;
+    align-items: flex-end !important;
+}
+
+html.rtl #kc-header-wrapper,
+html[dir=rtl] #kc-header-wrapper {
+    text-align: right !important;
+}
+
+html.rtl .card-pf,
+html[dir=rtl] .card-pf {
+    grid-column: 1 !important;
+    border-inline-start: none !important;
+    border-inline-end: 1px solid var(--card-border) !important;
+}
