@@ -39,6 +39,7 @@
     --secondary-color: #F0954A;
     --background-color: #FAF7F4;
     --card-bg: rgba(255, 255, 255, 0.74);
+    --card-opacity: 0.74;
     --card-blur: 18px;
     --text-color: #1c1a17;
     --muted-text: #6b625a;
