@@ -409,16 +409,18 @@ a:hover {
 }
 
 /* ==========================================================================
-   Animation knob -- <html class="anim-none|anim-subtle|anim-playful">, set by
-   theme-injector.js from the realm config (same class contract the magma
-   theme-studio preview uses). anim-subtle keeps the hover/press transitions
-   already defined above (scale(0.98) presses, border-color fades) and adds a
-   gentle card enter (fade + rise). anim-playful is snappier and more
-   pronounced (faster easing, bigger button lift) but never overshoots -- no
-   bounce, per interface-polish guidance. anim-none turns all of it off.
-   prefers-reduced-motion always wins, independent of the configured level.
+   Animation knobs -- <html class="anim-none|anim-subtle|anim-playful"> (the
+   intensity LEVEL) and <html class="animstyle-rise|fade|scale|slide"> (the
+   card/page ENTER TYPE, independent of level), set by theme-injector.js from
+   the realm config (same class contract the magma theme-studio preview
+   uses). anim-subtle keeps the hover/press transitions already defined above
+   (scale(0.98) presses, border-color fades) and adds a gentle card enter.
+   anim-playful is snappier and more pronounced (faster easing, bigger button
+   lift) but never overshoots -- no bounce, per interface-polish guidance.
+   anim-none turns all of it off, and always wins over any animstyle.
+   prefers-reduced-motion always wins over everything below.
    ========================================================================== */
-@keyframes kc-card-enter {
+@keyframes kc-card-enter-rise {
     from {
         opacity: 0;
         transform: translateY(12px);
@@ -430,12 +432,69 @@ a:hover {
     }
 }
 
+@keyframes kc-card-enter-fade {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes kc-card-enter-scale {
+    from {
+        opacity: 0;
+        transform: scale(0.96);
+    }
+
+    to {
+        opacity: 1;
+        transform: scale(1);
+    }
+}
+
+@keyframes kc-card-enter-slide {
+    from {
+        opacity: 0;
+        transform: translateX(24px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+/* Level rules own duration/easing/fill-mode; style rules own the keyframe
+   name -- separate longhand properties so they compose without conflict
+   regardless of which class combination is present. */
 html.anim-subtle .card-pf {
-    animation: kc-card-enter 0.42s cubic-bezier(0.2, 0, 0, 1) both;
+    animation-duration: 0.42s;
+    animation-timing-function: cubic-bezier(0.2, 0, 0, 1);
+    animation-fill-mode: both;
 }
 
 html.anim-playful .card-pf {
-    animation: kc-card-enter 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+    animation-duration: 0.5s;
+    animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+    animation-fill-mode: both;
+}
+
+html.animstyle-rise .card-pf {
+    animation-name: kc-card-enter-rise;
+}
+
+html.animstyle-fade .card-pf {
+    animation-name: kc-card-enter-fade;
+}
+
+html.animstyle-scale .card-pf {
+    animation-name: kc-card-enter-scale;
+}
+
+html.animstyle-slide .card-pf {
+    animation-name: kc-card-enter-slide;
 }
 
 html.anim-playful #kc-login,
@@ -466,6 +525,157 @@ html.anim-none *::after {
         transition: none !important;
         animation: none !important;
     }
+}
+
+/* ==========================================================================
+   Loader knob -- <html class="loader-spinner|loader-dots|loader-bars|loader-pulse">,
+   set by theme-injector.js (also tags Keycloak's own PatternFly `.pf-c-spinner`
+   with the same class, so any native "please wait" indicator picks up
+   --primary-color too). Standalone markup for the magma theme-studio preview's
+   dedicated loading page (documented in theme/MODERN_THEME.md):
+     <div class="kc-loader loader-<style>"><span></span><span></span><span></span></div>
+   All four variants share the same 3-span markup; each variant's CSS decides
+   how many spans are visible. Sized ~40px, centered, colored from
+   --primary-color. Disabled by prefers-reduced-motion above (universal `*`
+   selector already covers .kc-loader's spans). */
+.kc-loader {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    position: relative;
+}
+
+.kc-loader.loader-spinner span,
+.kc-loader.loader-pulse span {
+    display: none;
+}
+
+.kc-loader.loader-spinner span:first-child {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    border: 3px solid color-mix(in srgb, var(--primary-color) 25%, transparent);
+    border-top-color: var(--primary-color);
+    animation: kc-loader-spin 0.8s linear infinite;
+}
+
+.kc-loader.loader-pulse span:first-child {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    background: var(--primary-color);
+    animation: kc-loader-pulse 1.1s ease-in-out infinite;
+}
+
+.kc-loader.loader-dots {
+    gap: 6px;
+}
+
+.kc-loader.loader-dots span {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--primary-color);
+    animation: kc-loader-bounce 0.9s ease-in-out infinite both;
+}
+
+.kc-loader.loader-dots span:nth-child(1) {
+    animation-delay: -0.32s;
+}
+
+.kc-loader.loader-dots span:nth-child(2) {
+    animation-delay: -0.16s;
+}
+
+.kc-loader.loader-bars {
+    gap: 5px;
+    align-items: flex-end;
+    height: 32px;
+}
+
+.kc-loader.loader-bars span {
+    width: 6px;
+    height: 100%;
+    border-radius: 3px;
+    background: var(--primary-color);
+    transform-origin: bottom;
+    animation: kc-loader-bars 1s ease-in-out infinite;
+}
+
+.kc-loader.loader-bars span:nth-child(1) {
+    animation-delay: -0.24s;
+}
+
+.kc-loader.loader-bars span:nth-child(2) {
+    animation-delay: -0.12s;
+}
+
+@keyframes kc-loader-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@keyframes kc-loader-bounce {
+
+    0%,
+    80%,
+    100% {
+        transform: scale(0.6);
+        opacity: 0.5;
+    }
+
+    40% {
+        transform: scale(1);
+        opacity: 1;
+    }
+}
+
+@keyframes kc-loader-bars {
+
+    0%,
+    100% {
+        transform: scaleY(0.4);
+    }
+
+    50% {
+        transform: scaleY(1);
+    }
+}
+
+@keyframes kc-loader-pulse {
+    0% {
+        transform: scale(0.75);
+        opacity: 0.7;
+    }
+
+    70% {
+        transform: scale(1.15);
+        opacity: 0;
+    }
+
+    100% {
+        transform: scale(0.75);
+        opacity: 0;
+    }
+}
+
+/* Restyle Keycloak's own PatternFly spinner (color only -- its internal
+   ball/clipper structure differs from our span-based .kc-loader, so we
+   recolor rather than reimplement the dot/bar/pulse variants against it). */
+.pf-c-spinner {
+    color: var(--primary-color) !important;
+}
+
+.pf-c-spinner__clipper,
+.pf-c-spinner__lead-ball,
+.pf-c-spinner__tail-ball {
+    border-color: var(--primary-color) !important;
+    background-color: var(--primary-color) !important;
 }
 
 /* --- Footer --- */
