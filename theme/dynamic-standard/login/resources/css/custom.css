@@ -145,6 +145,70 @@ html[dir=rtl] .pf-c-check {
     padding-right: 20px !important;
 }
 
+/* --- Modern checkbox (remember-me / consent) ---
+   Hides the native box, draws a rounded custom control that fills with
+   --primary-color and shows a checkmark on :checked. Covers both markups
+   Keycloak ships depending on template version: the legacy `.checkbox`
+   wrapper (login.ftl remember-me) and the PatternFly `.pf-c-check`. */
+.login-pf-settings input[type=checkbox],
+.checkbox input[type=checkbox],
+.pf-c-check__input {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    width: 20px !important;
+    height: 20px !important;
+    margin: 0 !important;
+    flex: 0 0 auto !important;
+    position: relative !important;
+    border: 1.5px solid var(--input-border) !important;
+    border-radius: calc(var(--input-border-radius) * 0.4) !important;
+    background: var(--input-bg) !important;
+    cursor: pointer !important;
+    transition: background-color 0.15s, border-color 0.15s !important;
+}
+
+.login-pf-settings input[type=checkbox]:checked,
+.checkbox input[type=checkbox]:checked,
+.pf-c-check__input:checked {
+    background: var(--primary-color) !important;
+    border-color: var(--primary-color) !important;
+}
+
+.login-pf-settings input[type=checkbox]:checked::after,
+.checkbox input[type=checkbox]:checked::after,
+.pf-c-check__input:checked::after {
+    content: "" !important;
+    position: absolute !important;
+    left: 6px !important;
+    top: 2px !important;
+    width: 5px !important;
+    height: 10px !important;
+    border: solid #fff !important;
+    border-width: 0 2px 2px 0 !important;
+    transform: rotate(45deg) !important;
+}
+
+.login-pf-settings input[type=checkbox]:focus-visible,
+.checkbox input[type=checkbox]:focus-visible,
+.pf-c-check__input:focus-visible {
+    outline: none !important;
+    box-shadow: 0 0 0 3px var(--focus-ring) !important;
+    border-color: var(--input-focus-color) !important;
+}
+
+.checkbox label,
+.login-pf-settings label.checkbox,
+.pf-c-check__label {
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    margin: 0 !important;
+    cursor: pointer !important;
+    font-weight: 500 !important;
+    font-size: 0.875rem !important;
+    opacity: 0.9 !important;
+}
+
 /* --- Inputs (shared shell for plain inputs + password input-group) --- */
 /* width:100% is explicit (not left to Keycloak's own PatternFly base CSS) so
    every field -- including the two-column profile/register layout -- fills
