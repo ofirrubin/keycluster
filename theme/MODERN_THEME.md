@@ -97,15 +97,80 @@ live page and the offline preview animate identically.
 
 | Level | What it does |
 | --- | --- |
-| `none` | `html.anim-none *,*::before,*::after { transition:none; animation:none }` -- every hover/press/enter effect off. |
-| `subtle` (default) | The hover/press transitions already defined in the component layer (border-color/box-shadow fades, `scale(0.98)` button press) plus a gentle card enter: `kc-card-enter` keyframe, fade + 12px rise, `0.42s cubic-bezier(0.2, 0, 0, 1)`. |
-| `playful` | Same enter keyframe but `0.5s cubic-bezier(0.16, 1, 0.3, 1)`; primary-button hover/press transitions speed up to `0.12s` and lift `translateY(-2px)` on hover. No overshoot/spring bounce anywhere -- snappier and more pronounced, never jarring. |
+| `none` | `html.anim-none *,*::before,*::after { transition:none; animation:none }` -- every hover/press/enter effect off. Always wins over any `animationStyle`. |
+| `subtle` (default) | The hover/press transitions already defined in the component layer (border-color/box-shadow fades, `scale(0.98)` button press) plus a gentle card enter, `0.42s cubic-bezier(0.2, 0, 0, 1)`. |
+| `playful` | Same enter timing profile but `0.5s cubic-bezier(0.16, 1, 0.3, 1)`; primary-button hover/press transitions speed up to `0.12s` and lift `translateY(-2px)` on hover. No overshoot/spring bounce anywhere -- snappier and more pronounced, never jarring. |
 
 `@media (prefers-reduced-motion: reduce)` forces `transition:none;
-animation:none` on every element as a CSS-level backstop, independent of the
-JS class -- the injector also checks `matchMedia('(prefers-reduced-motion:
-reduce)')` itself and overrides the configured level to `none`, live, via a
-`change` listener (covers the OS setting flipping mid-session).
+animation:none` on every element (including `.kc-loader` and `.pf-c-spinner`,
+both matched by the universal `*` selector) as a CSS-level backstop,
+independent of the JS class -- the injector also checks
+`matchMedia('(prefers-reduced-motion: reduce)')` itself and overrides the
+configured level to `none`, live, via a `change` listener (covers the OS
+setting flipping mid-session).
+
+### Enter animation TYPE (`animationStyle`)
+
+`animationStyle` (`"rise" | "fade" | "scale" | "slide"`, default `"rise"`) is
+a second, independent native knob (same schema/defaults file) -- it picks
+WHICH card/page enter keyframe plays, while `animation` (above) still governs
+WHETHER it plays and how fast/snappy. `theme-injector.js` sets `<html
+class="animstyle-rise|animstyle-fade|animstyle-scale|animstyle-slide">`. The
+level rules (`.anim-subtle`/`.anim-playful` on `.card-pf`) own
+`animation-duration`/`animation-timing-function`/`animation-fill-mode`; the
+style rules (`.animstyle-*` on `.card-pf`) own only `animation-name` --
+separate longhand declarations so both compose without one clobbering the
+other, regardless of file order. `.anim-none`'s `animation: none !important`
+(shorthand, universal selector) still wins over all of it.
+
+| Style | Keyframe (`kc-card-enter-<style>`) |
+| --- | --- |
+| `rise` (default) | `opacity 0->1` + `translateY(12px)->0` |
+| `fade` | `opacity 0->1` only, no transform |
+| `scale` | `opacity 0->1` + `scale(0.96)->1` |
+| `slide` | `opacity 0->1` + `translateX(24px)->0` |
+
+### Loader / spinner (`loader`)
+
+`loader` (`"spinner" | "dots" | "bars" | "pulse"`, default `"spinner"`) is a
+themeable loading indicator colored from `--primary-color`. `theme-
+injector.js` sets `<html class="loader-spinner|loader-dots|loader-bars|
+loader-pulse">` and also adds the same class to any `.pf-c-spinner` element
+already on the page (Keycloak's own PatternFly "please wait" indicator), so a
+native loading page picks up the brand color too -- that recolor is
+color-only (`.pf-c-spinner` uses PatternFly's own internal ball/clipper
+structure, which the 3-span markup below doesn't replicate against).
+
+**Markup contract for the standalone `.kc-loader` component** (this is what
+the magma theme-studio preview's dedicated loading page should render --
+always the same 3 `<span>` children regardless of variant; each variant's CSS
+decides how many spans are actually shown):
+
+```html
+<div class="kc-loader loader-spinner"><span></span><span></span><span></span></div>
+<div class="kc-loader loader-dots"><span></span><span></span><span></span></div>
+<div class="kc-loader loader-bars"><span></span><span></span><span></span></div>
+<div class="kc-loader loader-pulse"><span></span><span></span><span></span></div>
+```
+
+| Variant | Spans used | Effect |
+| --- | --- | --- |
+| `spinner` (default) | span 1 only | rotating ring, `border-top-color: var(--primary-color)`, `kc-loader-spin` (0.8s linear infinite) |
+| `dots` | all 3 | bouncing dots, `background: var(--primary-color)`, `kc-loader-bounce` (0.9s, staggered `-0.32s`/`-0.16s`/`0s` delays) |
+| `bars` | all 3 | scaling vertical bars, `background: var(--primary-color)`, `kc-loader-bars` (1s, staggered `-0.24s`/`-0.12s`/`0s` delays) |
+| `pulse` | span 1 only | pulsing/fading circle, `background: var(--primary-color)`, `kc-loader-pulse` (1.1s ease-in-out infinite) |
+
+`.kc-loader` itself is a fixed ~40px x 40px centered box (`display:
+inline-flex; align-items/justify-content: center`); no size knob yet -- add
+one (plus schema/defaults/injector wiring) if the preview needs it.
+
+### Fully custom motion/loader: `customCss`
+
+No new field needed for anything beyond the four variants above --
+`customCss` (already sanitized server-side, injected last so it wins over
+pack CSS) is the escape hatch for a realm that wants its own `@keyframes` or
+a bespoke loader graphic. It can freely target `.kc-loader`, `.card-pf`, or
+define new keyframe names and point `.card-pf`'s `animation-name` at them.
 
 ## Reproducing the ecommerce look with zero customCss
 
@@ -129,6 +194,8 @@ the `onguard` realm via `POST /v1/themes/onguard`:
   "fontFamily": "'Roboto', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Heebo', sans-serif",
   "footerText": "Secured by Keycluster",
   "animation": "subtle",
+  "animationStyle": "rise",
+  "loader": "spinner",
   "customCss": ""
 }
 ```
