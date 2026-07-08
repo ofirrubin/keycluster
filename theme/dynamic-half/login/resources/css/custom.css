@@ -42,7 +42,7 @@
     --primary-color: #EA6A2E;
     --secondary-color: #F0954A;
     --background-color: #FAF7F4;
-    --card-bg: rgba(255, 255, 255, 0.74);
+    --card-bg: color-mix(in srgb, color-mix(in srgb, #ffffff, var(--primary-color) 4%) 74%, transparent);
     --card-opacity: 0.74;
     --card-blur: 18px;
     --text-color: #1c1a17;
@@ -64,7 +64,7 @@
 
 :root.dark-mode {
     --background-color: #17140f;
-    --card-bg: rgba(30, 26, 22, 0.62);
+    --card-bg: color-mix(in srgb, color-mix(in srgb, #1a1a1e, var(--primary-color) 8%) 62%, transparent);
     --text-color: #ece7e1;
     --muted-text: #b7ada4;
     --input-bg: rgba(255, 255, 255, 0.06);
@@ -78,7 +78,7 @@
 @media (prefers-color-scheme: dark) {
     :root:not(.light-mode) {
         --background-color: #17140f;
-        --card-bg: rgba(30, 26, 22, 0.62);
+        --card-bg: color-mix(in srgb, color-mix(in srgb, #1a1a1e, var(--primary-color) 8%) 62%, transparent);
         --text-color: #ece7e1;
         --muted-text: #b7ada4;
         --input-bg: rgba(255, 255, 255, 0.06);
