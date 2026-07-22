@@ -360,8 +360,20 @@
                 }
             }
 
-            // Footer (applies on every page)
-            const footerText = translations.footerText || config.footerText;
+            // Footer (applies on every page).
+            // The brand default footer ("Secured by Keycluster") is served in
+            // English by the config API and has no message-bundle path, so
+            // localize the *untranslated default* for locales we ship a string
+            // for. A realm-customized footerText or an explicit per-locale
+            // translation always wins.
+            const DEFAULT_FOOTER = 'Secured by Keycluster';
+            const LOCALIZED_DEFAULT_FOOTER = { he: 'מאובטח על ידי Keycluster' };
+            let footerText = translations.footerText || config.footerText;
+            if (!translations.footerText
+                && (!config.footerText || config.footerText === DEFAULT_FOOTER)
+                && LOCALIZED_DEFAULT_FOOTER[urlLocale]) {
+                footerText = LOCALIZED_DEFAULT_FOOTER[urlLocale];
+            }
             if (footerText) {
                 let footer = document.getElementById('custom-footer') || document.createElement('div');
                 footer.id = 'custom-footer';

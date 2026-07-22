@@ -52,6 +52,8 @@
     --card-border: rgba(20, 20, 20, 0.08);
     --card-shadow: 0 24px 64px -22px rgba(80, 40, 10, 0.30), 0 2px 8px rgba(0, 0, 0, 0.04);
     --autofill-bg: #F3EEE9;
+    --alert-bg: rgba(234, 106, 46, 0.10);
+    --alert-border: rgba(234, 106, 46, 0.28);
     --font-family: 'Roboto', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Heebo', sans-serif;
     --logo-url: none;
     --logo-bg: var(--primary-color);
@@ -68,6 +70,8 @@
     --card-border: rgba(255, 255, 255, 0.10);
     --card-shadow: 0 28px 80px -26px rgba(0, 0, 0, 0.65);
     --autofill-bg: #2a2420;
+    --alert-bg: rgba(255, 255, 255, 0.07);
+    --alert-border: rgba(255, 255, 255, 0.16);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -82,6 +86,8 @@
         --card-border: rgba(255, 255, 255, 0.10);
         --card-shadow: 0 28px 80px -26px rgba(0, 0, 0, 0.65);
         --autofill-bg: #2a2420;
+        --alert-bg: rgba(255, 255, 255, 0.07);
+        --alert-border: rgba(255, 255, 255, 0.16);
     }
 }
 
@@ -390,6 +396,33 @@ a:hover {
 .dark-mode #kc-registration span,
 .dark-mode #kc-login-reset-password span {
     color: var(--text-color) !important;
+}
+
+/* --- Info / feedback / alert box: force readable contrast ---
+   Keycloak feedback + info messages (incl. the "reauthenticate" notice shown
+   during re-auth) otherwise inherit PatternFly's light-gray title on the
+   near-white glass card and become invisible. Force dark-on-tint (AA, ~15:1 in
+   light mode; high-contrast light-on-dark in dark mode). Block-level, so the
+   RTL direction inherited from <html dir=rtl> is preserved. */
+#kc-info-message,
+.pf-c-alert,
+.alert {
+    background: var(--alert-bg) !important;
+    border: 1px solid var(--alert-border) !important;
+    border-radius: var(--input-border-radius) !important;
+    padding: 0.7rem 0.9rem !important;
+    margin: 0 0 1rem !important;
+    color: var(--text-color) !important;
+    opacity: 1 !important;
+}
+
+#kc-info-message .instruction,
+.pf-c-alert .pf-c-alert__title,
+.pf-c-alert__title,
+.kc-feedback-text {
+    color: var(--text-color) !important;
+    opacity: 1 !important;
+    font-weight: 500 !important;
 }
 
 /* --- Footer --- */
