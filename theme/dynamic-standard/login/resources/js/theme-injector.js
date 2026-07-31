@@ -4,6 +4,10 @@
 
     const realm = realmMatch[1];
 
+    // Reveal the page once themed (or after a safety timeout / on error) to avoid a default-theme flash.
+    const revealTheme = function () { document.documentElement.classList.add('kc-theme-ready'); };
+    setTimeout(revealTheme, 1200);
+
     // --- 1. Parse URL Parameters (OIDC Hints) ---
     const urlParams = new URLSearchParams(window.location.search);
 
@@ -392,5 +396,6 @@
                 }
             }
         })
-        .catch(err => console.log('Theme config fetch failed, using defaults', err));
+        .catch(err => console.log('Theme config fetch failed, using defaults', err))
+        .finally(revealTheme);
 })();

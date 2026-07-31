@@ -443,3 +443,13 @@ a:hover {
 .pf-c-dropdown__toggle.pf-m-plain {
     display: none !important;
 }
+
+/* Prevent default-theme flash: hide until theme-injector applies the realm config. */
+html:not(.kc-theme-ready) body { visibility: hidden !important; }
+
+/* Suppress the browser/OS focus-visible ring; the themed ring above is the only indicator. */
+.pf-c-form-control:focus-visible,
+.form-control:focus-visible,
+input:focus-visible,
+button:focus-visible,
+#kc-login:focus-visible { outline: none !important; box-shadow: 0 0 0 3px var(--focus-ring) !important; }
