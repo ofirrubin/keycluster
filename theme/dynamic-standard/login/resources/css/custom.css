@@ -46,14 +46,14 @@
     --input-border-radius: 12px;
     --input-bg: rgba(255, 255, 255, 0.72);
     --input-border: rgba(20, 20, 20, 0.14);
-    --input-focus-color: #EA6A2E;
-    --focus-ring: rgba(234, 106, 46, 0.38);
+    --input-focus-color: var(--primary-color);
+    --focus-ring: color-mix(in srgb, var(--primary-color) 38%, transparent);
     --icon-color: #6b625a;
     --card-border: rgba(20, 20, 20, 0.08);
     --card-shadow: 0 24px 64px -22px rgba(80, 40, 10, 0.30), 0 2px 8px rgba(0, 0, 0, 0.04);
-    --autofill-bg: #F3EEE9;
-    --alert-bg: rgba(234, 106, 46, 0.10);
-    --alert-border: rgba(234, 106, 46, 0.28);
+    --autofill-bg: color-mix(in srgb, var(--primary-color) 6%, #ffffff);
+    --alert-bg: color-mix(in srgb, var(--primary-color) 10%, transparent);
+    --alert-border: color-mix(in srgb, var(--primary-color) 28%, transparent);
     --font-family: 'Roboto', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'Heebo', sans-serif;
     --logo-url: none;
     --logo-bg: var(--primary-color);
@@ -93,7 +93,7 @@
 
 /* --- Page background: warm radial gradient --- */
 body {
-    background: radial-gradient(1100px 640px at 50% -18%, #FCE9DA 0%, var(--background-color) 46%, #F3EEE9 100%) !important;
+    background: radial-gradient(1100px 640px at 50% -18%, color-mix(in srgb, var(--primary-color) 14%, #ffffff) 0%, var(--background-color) 46%, color-mix(in srgb, var(--primary-color) 7%, #ffffff) 100%) !important;
     color: var(--text-color) !important;
     font-family: var(--font-family) !important;
     margin: 0;
@@ -101,7 +101,7 @@ body {
 
 :root.dark-mode body,
 html.dark-mode body {
-    background: radial-gradient(1100px 640px at 50% -18%, #2a1d12 0%, var(--background-color) 52%, #101013 100%) !important;
+    background: radial-gradient(1100px 640px at 50% -18%, color-mix(in srgb, var(--primary-color) 24%, #0b0b0f) 0%, var(--background-color) 52%, #0b0b0f 100%) !important;
     color: var(--text-color) !important;
 }
 
@@ -159,7 +159,7 @@ html.dark-mode body {
     background-position: center !important;
     background-repeat: no-repeat !important;
     border-radius: 16px !important;
-    box-shadow: 0 10px 24px -10px rgba(234, 106, 46, 0.6) !important;
+    box-shadow: 0 10px 24px -10px color-mix(in srgb, var(--primary-color) 60%, transparent) !important;
 }
 
 /* Explicit logo slot, if a template exposes one */
@@ -353,7 +353,7 @@ input[type=submit] {
     min-height: 46px !important;
     width: 100% !important;
     margin-top: 0.4rem !important;
-    box-shadow: 0 10px 22px -8px rgba(234, 106, 46, 0.6) !important;
+    box-shadow: 0 10px 22px -8px color-mix(in srgb, var(--primary-color) 60%, transparent) !important;
     transition: transform 0.06s, box-shadow 0.15s, filter 0.15s !important;
 }
 
@@ -361,7 +361,7 @@ input[type=submit] {
 .pf-c-button.pf-m-primary:hover,
 .btn-primary:hover {
     filter: brightness(1.04) !important;
-    box-shadow: 0 14px 28px -8px rgba(234, 106, 46, 0.72) !important;
+    box-shadow: 0 14px 28px -8px color-mix(in srgb, var(--primary-color) 72%, transparent) !important;
 }
 
 #kc-login:active,
