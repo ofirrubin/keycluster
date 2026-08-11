@@ -14,6 +14,8 @@ WORKDIR /app
 COPY --from=builder /usr/local/lib/python3.11/site-packages /usr/local/lib/python3.11/site-packages
 COPY --from=builder /usr/local/bin /usr/local/bin
 
+# CACHE_BUST changes per commit (set by dev/cli/images.sh) so the source COPY+build is not served from a stale layer.
+ARG CACHE_BUST=dev
 COPY app/ ./app/
 COPY alembic.ini .
 

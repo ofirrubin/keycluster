@@ -8,6 +8,9 @@ ENV KC_METRICS_ENABLED=true
 ENV KC_DB=postgres
 
 WORKDIR /opt/keycloak
+
+# CACHE_BUST changes per commit (set by dev/cli/images.sh) so the source COPY+build is not served from a stale layer.
+ARG CACHE_BUST=dev
 # Copy custom theme
 COPY theme/ /opt/keycloak/themes/
 
