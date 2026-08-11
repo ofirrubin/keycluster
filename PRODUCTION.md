@@ -5,8 +5,17 @@ development setup to a production SaaS deployment supporting many tenants.
 
 ## 1. High Availability and Scalability
 
-- **Keycloak Clustering**: Scale `replicas` to 3+. Configure **JGroups** with
-  `DNS_PING` so pods discover each other and sync user sessions and cache.
+- **Keycloak Clustering (done)**: `scripts/generate_keycloak_manifest.py`
+  generates a production HA manifest -- Infinispan (`ispn`) distributed
+  session cache, `KUBE_PING` JGroups discovery (K8s API-based, no extra
+  headless Service needed), 3 replicas by default (configurable, minimum 2),
+  pod anti-affinity to spread replicas across nodes, a `PodDisruptionBudget`,
+  and a `startupProbe` sized to survive cluster-formation time without
+  flapping readiness/liveness. Defaults to HA for **new** instances; existing
+  running instances keep the original single-replica manifest
+  (`k8s/keycloak.yaml`) until an operator explicitly runs
+  `make deploy-keycloak-ha` to upgrade one. See `scripts/keymanifest/` and
+  `tests/test_keycloak_manifest.py`.
 - **Managed Database**: Do not run PostgreSQL in a StatefulSet for production.
   Use a managed service such as AWS RDS, GKE Cloud SQL, or Azure Database for
   PostgreSQL. Update `DATABASE_URL` to a secure connection string.

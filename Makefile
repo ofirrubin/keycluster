@@ -4,8 +4,24 @@ deploy-db:
 	kubectl apply -f k8s/postgres.yaml
 
 deploy-keycloak:
-	# Note: Build the docker image first if using the custom theme
+	# Legacy/standalone single-replica manifest. Existing tenant instances
+	# keep deploying this way -- it is never regenerated or mutated by the
+	# HA generator below.
 	kubectl apply -f k8s/keycloak.yaml
+
+# Explicit opt-in upgrade path for an ALREADY-RUNNING instance: renders the
+# HA manifest (Infinispan + KUBE_PING clustering, multi-replica) and applies
+# it. Never run automatically -- an operator must invoke this deliberately.
+# New instances should render+apply this from the start instead of
+# deploy-keycloak.
+deploy-keycloak-ha:
+	python3 scripts/generate_keycloak_manifest.py --mode ha | kubectl apply -f -
+
+render-keycloak-manifest:
+	python3 scripts/generate_keycloak_manifest.py $(ARGS)
+
+test-manifest-generator:
+	python3 -m unittest discover -s tests -p "test_keycloak_manifest.py"
 
 deploy-domain-manager:
 	# Note: Build the docker image first
