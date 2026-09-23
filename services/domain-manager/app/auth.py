@@ -17,6 +17,8 @@ from typing import List, Optional
 import httpx
 from fastapi import Depends, HTTPException, Request
 
+from app.token_type import is_bearer_access_token
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -239,6 +241,12 @@ async def verify_token(request: Request) -> dict:
             logger.warning("JWT verification failed: exc_type=%s", type(exc).__name__)
             raise HTTPException(status_code=401, detail="Invalid token") from exc
 
+    # dam#634: ID tokens are RS256-signed like access tokens, so a valid
+    # signature does not prove an access token. Anything that is not an
+    # unconstrained typ=Bearer token gets the same response as a bad signature.
+    if not is_bearer_access_token(payload):
+        raise HTTPException(status_code=401, detail="Invalid token")
+
     now = time.time()
 
     exp = payload.get("exp")
@@ -446,7 +454,12 @@ async def introspect_token(token: str) -> bool:
             )
             resp.raise_for_status()
             result = resp.json()
-            return result.get("active", False)
+            if result.get("active") is not True:
+                return False
+            # dam#634: Keycloak reports refresh, offline and ID tokens as
+            # active; only an access token counts. The rejection is identical
+            # to an inactive token.
+            return is_bearer_access_token(result)
     except Exception as e:
         logger.error(
             "Token introspection failed: exc_type=%s", type(e).__name__
