@@ -6,17 +6,18 @@ import asyncio
 import base64
 import json
 import logging
+import math
 import os
 import re
 import sys
 import time
 import urllib.parse
-from collections import deque
 from typing import List, Optional
 
 import httpx
 from fastapi import Depends, HTTPException, Request
 
+from app.sliding_window import SlidingWindowLimiter
 from app.token_type import is_bearer_access_token
 
 logger = logging.getLogger(__name__)
@@ -104,26 +105,43 @@ _jwks_cache_time: float = 0.0
 _JWKS_CACHE_TTL: float = 300.0  # 5 minutes
 _jwks_lock: asyncio.Lock = asyncio.Lock()
 
-# Rate limiter: track JWKS fetch timestamps (max 10 per 60 seconds)
+# Rate limiter: at most 10 JWKS refresh cycles (discovery + keys) per 60 seconds.
+# A refresh denied by the limiter serves the cached JWKS, stale or not; only a
+# process that has never fetched keys answers 429 (see verify_token).
 _JWKS_MAX_FETCHES_PER_MIN: int = 10
-_jwks_fetch_timestamps: list[float] = []
+_jwks_rate_limiter = SlidingWindowLimiter(_JWKS_MAX_FETCHES_PER_MIN, 60.0)
 
 
-def _check_jwks_rate_limit() -> None:
-    """Enforce max 10 JWKS fetches per 60 seconds."""
-    now = time.time()
-    cutoff = now - 60.0
-    # Prune old entries
-    while _jwks_fetch_timestamps and _jwks_fetch_timestamps[0] < cutoff:
-        _jwks_fetch_timestamps.pop(0)
-    if len(_jwks_fetch_timestamps) >= _JWKS_MAX_FETCHES_PER_MIN:
-        raise ValueError("JWKS fetch rate limit exceeded")
-    _jwks_fetch_timestamps.append(now)
+class JwksRateLimited(Exception):
+    """JWKS refresh denied by the rate limiter and no cached JWKS to fall back on."""
 
-# Rate limiting for JWKS refresh: max 10 fetches per 60 seconds
-_JWKS_RATE_LIMIT_MAX = 10
-_JWKS_RATE_LIMIT_WINDOW = 60
-_jwks_fetch_timestamps: deque = deque()
+    def __init__(self, retry_after: float) -> None:
+        super().__init__("JWKS fetch rate limit exceeded")
+        self.retry_after = retry_after
+
+
+def _jwks_cache_fresh() -> bool:
+    return _jwks_cache is not None and (time.monotonic() - _jwks_cache_time) <= _JWKS_CACHE_TTL
+
+
+async def _load_jwks() -> dict:
+    """Fetch discovery + JWKS under the limiter. Caller must hold _jwks_lock."""
+    global _jwks_cache, _jwks_uri_cache, _jwks_cache_time
+    if not _jwks_rate_limiter.try_acquire():
+        if _jwks_cache is not None:
+            logger.warning("jwks_rate_limited serving_cached=true")
+            return _jwks_cache
+        logger.warning("jwks_rate_limited serving_cached=false")
+        raise JwksRateLimited(_jwks_rate_limiter.retry_after())
+    if _jwks_uri_cache is None:
+        _jwks_uri_cache = await _fetch_keycloak_jwks_uri()
+    try:
+        _jwks_cache = await _fetch_jwks(_jwks_uri_cache)
+    except Exception:
+        _jwks_uri_cache = None  # rediscover next time in case jwks_uri moved
+        raise
+    _jwks_cache_time = time.monotonic()
+    return _jwks_cache
 
 
 async def _fetch_keycloak_jwks_uri() -> str:
@@ -136,7 +154,6 @@ async def _fetch_keycloak_jwks_uri() -> str:
 
 
 async def _fetch_jwks(jwks_uri: str) -> dict:
-    _check_jwks_rate_limit()
     async with httpx.AsyncClient() as http:
         resp = await http.get(jwks_uri, timeout=5.0)
         resp.raise_for_status()
@@ -144,29 +161,20 @@ async def _fetch_jwks(jwks_uri: str) -> dict:
 
 
 async def _get_jwks() -> dict:
-    global _jwks_cache, _jwks_uri_cache, _jwks_cache_time
     # Fast path: return cached JWKS without acquiring the lock
-    if _jwks_cache is not None and (time.time() - _jwks_cache_time) <= _JWKS_CACHE_TTL:
+    if _jwks_cache_fresh():
         return _jwks_cache
     # Slow path: acquire lock so only one coroutine fetches at a time
     async with _jwks_lock:
         # Double-check after acquiring the lock (another coroutine may have refreshed)
-        if _jwks_cache is not None and (time.time() - _jwks_cache_time) <= _JWKS_CACHE_TTL:
+        if _jwks_cache_fresh():
             return _jwks_cache
-        _jwks_uri_cache = await _fetch_keycloak_jwks_uri()
-        _jwks_cache = await _fetch_jwks(_jwks_uri_cache)
-        _jwks_cache_time = time.time()
-    return _jwks_cache
+        return await _load_jwks()
 
 
 async def _refresh_jwks() -> dict:
-    global _jwks_cache, _jwks_uri_cache, _jwks_cache_time
     async with _jwks_lock:
-        if _jwks_uri_cache is None:
-            _jwks_uri_cache = await _fetch_keycloak_jwks_uri()
-        _jwks_cache = await _fetch_jwks(_jwks_uri_cache)
-        _jwks_cache_time = time.time()
-    return _jwks_cache
+        return await _load_jwks()
 
 
 def _decode_jwt_unverified_header(token: str) -> dict:
@@ -231,15 +239,23 @@ async def verify_token(request: Request) -> dict:
     token = auth_header[7:]
 
     try:
-        jwks = await _get_jwks()
-        payload = _verify_jwt_signature(token, jwks)
-    except Exception:
         try:
+            jwks = await _get_jwks()
+            payload = _verify_jwt_signature(token, jwks)
+        except JwksRateLimited:
+            raise
+        except Exception:
             jwks = await _refresh_jwks()
             payload = _verify_jwt_signature(token, jwks)
-        except Exception as exc:
-            logger.warning("JWT verification failed: exc_type=%s", type(exc).__name__)
-            raise HTTPException(status_code=401, detail="Invalid token") from exc
+    except JwksRateLimited as exc:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many requests",
+            headers={"Retry-After": str(max(1, math.ceil(exc.retry_after)))},
+        ) from exc
+    except Exception as exc:
+        logger.warning("JWT verification failed: exc_type=%s", type(exc).__name__)
+        raise HTTPException(status_code=401, detail="Invalid token") from exc
 
     # dam#634: ID tokens are RS256-signed like access tokens, so a valid
     # signature does not prove an access token. Anything that is not an
