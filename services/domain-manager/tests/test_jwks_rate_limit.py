@@ -2,9 +2,9 @@
 
 The old limiter pruned a deque with ``pop(0)`` (TypeError once a timestamp
 aged past 60s) and raised ValueError once the limit was hit; verify_token
-mapped both to 401 for every caller. These tests drive the real auth module
-with a fake clock and a fake Keycloak (httpx.AsyncClient), and reload the
-module per test so they run unchanged against the old and the new code.
+mapped both to 401 for every caller. These tests drive the real auth and
+jwks_cache modules with a fake clock and a fake Keycloak (httpx.AsyncClient),
+reloading both per test for fresh cache and limiter state.
 """
 import asyncio
 import importlib
@@ -15,7 +15,7 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from app import auth
+from app import auth, jwks_cache
 from app.sliding_window import SlidingWindowLimiter
 
 EPOCH = 1_800_000_000.0
@@ -71,14 +71,20 @@ class FakeClient:
         return FakeResponse({"keys": [{"kid": "k1"}], "n": self._kc.jwks_fetches}, 200)
 
 
+def _reload() -> None:
+    """Fresh cache + limiter state; auth re-imports the reloaded functions."""
+    importlib.reload(jwks_cache)
+    importlib.reload(auth)
+
+
 @pytest.fixture
 def env(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[FakeClock, FakeKeycloak]]:
     clock = FakeClock()
     kc = FakeKeycloak()
     monkeypatch.setattr(time, "monotonic", clock)
     monkeypatch.setattr(time, "time", lambda: EPOCH + clock.t)
-    importlib.reload(auth)  # fresh cache + limiter state
-    monkeypatch.setattr(auth.httpx, "AsyncClient", kc.client)
+    _reload()
+    monkeypatch.setattr(jwks_cache.httpx, "AsyncClient", kc.client)
 
     def verify(token: str, jwks: dict[str, Any]) -> dict[str, Any]:
         if not any(k.get("kid") == "k1" for k in jwks.get("keys", [])):
@@ -97,7 +103,7 @@ def env(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple[FakeClock, FakeKeyclo
     monkeypatch.setattr(auth, "_verify_jwt_signature", verify)
     yield clock, kc
     monkeypatch.undo()
-    importlib.reload(auth)
+    _reload()
 
 
 def _request() -> Request:
@@ -121,11 +127,11 @@ def test_fetch_after_window_ages_out_does_not_crash(env: tuple[FakeClock, FakeKe
 def test_limit_hit_then_one_more_refresh_serves_cache(env: tuple[FakeClock, FakeKeycloak]) -> None:
     """Old code: the 11th refresh raised ValueError instead of degrading."""
     _, kc = env
-    for _ in range(auth._JWKS_MAX_FETCHES_PER_MIN):
-        asyncio.run(auth._refresh_jwks())
-    jwks = asyncio.run(auth._refresh_jwks())
+    for _ in range(jwks_cache._JWKS_MAX_FETCHES_PER_MIN):
+        asyncio.run(jwks_cache._refresh_jwks())
+    jwks = asyncio.run(jwks_cache._refresh_jwks())
     assert jwks["keys"] == [{"kid": "k1"}]
-    assert kc.jwks_fetches == auth._JWKS_MAX_FETCHES_PER_MIN
+    assert kc.jwks_fetches == jwks_cache._JWKS_MAX_FETCHES_PER_MIN
     assert _verify()["sub"] == "user"
 
 
@@ -135,7 +141,7 @@ def test_limit_hit_with_stale_cache_still_authenticates(env: tuple[FakeClock, Fa
     clock.t = 301.0
     kc.fail = True  # Keycloak outage burns the refresh budget
     # each failed verify spends two slots: the cache refill, then the retry refresh
-    for _ in range(auth._JWKS_MAX_FETCHES_PER_MIN // 2):
+    for _ in range(jwks_cache._JWKS_MAX_FETCHES_PER_MIN // 2):
         with pytest.raises(HTTPException) as exc_info:
             _verify()
         assert exc_info.value.status_code == 401
@@ -145,7 +151,7 @@ def test_limit_hit_with_stale_cache_still_authenticates(env: tuple[FakeClock, Fa
 def test_limit_hit_without_cache_returns_429(env: tuple[FakeClock, FakeKeycloak]) -> None:
     clock, kc = env
     kc.fail = True
-    for _ in range(auth._JWKS_MAX_FETCHES_PER_MIN // 2):
+    for _ in range(jwks_cache._JWKS_MAX_FETCHES_PER_MIN // 2):
         with pytest.raises(HTTPException):
             _verify()
     clock.t = 15.0
