@@ -36,7 +36,7 @@ docker build -t domain-manager:latest ./services/domain-manager
 
 ## 3. Update Manifest to Use Local Image
 
-Edit `k8s/keycloak.yaml` to use `keycloak-custom:latest` and set
+Build with `make build` (tags `keycloak-custom:<commit>`), deploy with `make deploy-keycloak` (renders the tag into `k8s/keycloak.yaml`), and set
 `imagePullPolicy: IfNotPresent`.
 
 ## 4. Configure Secrets

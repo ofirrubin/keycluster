@@ -1,11 +1,14 @@
 # Helper commands for keycluster
 
+# Images are tagged with the commit they were built from, never with a mutable tag.
+TAG := $(shell git rev-parse --short=12 HEAD)
+
 deploy-db:
 	kubectl apply -f k8s/postgres.yaml
 
 deploy-keycloak:
-	# Note: Build the docker image first if using the custom theme
-	kubectl apply -f k8s/keycloak.yaml
+	# Note: run `make build` first; the manifest is rendered with the commit tag
+	sed 's/KEYCLOAK_IMAGE_TAG/$(TAG)/' k8s/keycloak.yaml | kubectl apply -f -
 
 deploy-domain-manager:
 	# Note: Build the docker image first
@@ -13,7 +16,7 @@ deploy-domain-manager:
 
 build:
 	eval $$(minikube docker-env) && \
-	docker build --no-cache -t keycloak-custom:latest . && \
+	docker build --no-cache -t keycloak-custom:$(TAG) . && \
 	docker build -t domain-manager:latest ./services/domain-manager
 
 restart:

@@ -36,7 +36,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: keycloak
-          image: keycloak-custom:latest # Use the custom built image
+          image: keycloak-custom:KEYCLOAK_IMAGE_TAG # immutable tag rendered by `make deploy-keycloak`; never a mutable tag
           imagePullPolicy: Always
           securityContext:
             allowPrivilegeEscalation: false
