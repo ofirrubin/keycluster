@@ -30,7 +30,7 @@ environment.
 eval $(minikube docker-env)
 
 # Build the images
-docker build -t keycloak-custom:latest .
+make build
 docker build -t domain-manager:latest ./services/domain-manager
 ```
 
